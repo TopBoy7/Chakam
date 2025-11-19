@@ -1,0 +1,101 @@
+import { ClassroomData, UsagePattern } from '@/types/classroom';
+
+export const mockClassrooms: ClassroomData[] = [
+  {
+    id: 'ENG-101',
+    name: 'ENG-101',
+    building: 'Engineering Block A',
+    capacity: 120,
+    status: 'occupied',
+    lastUpdated: new Date(),
+    sensorData: {
+      motion: 1,
+      distance: 45,
+      timestamp: new Date(),
+    },
+    occupancyPercentage: 85,
+  },
+  {
+    id: 'ENG-102',
+    name: 'ENG-102',
+    building: 'Engineering Block A',
+    capacity: 100,
+    status: 'available',
+    lastUpdated: new Date(Date.now() - 300000),
+    sensorData: {
+      motion: 0,
+      distance: 120,
+      timestamp: new Date(Date.now() - 300000),
+    },
+    occupancyPercentage: 0,
+  },
+  {
+    id: 'ENG-201',
+    name: 'ENG-201',
+    building: 'Engineering Block B',
+    capacity: 80,
+    status: 'occupied',
+    lastUpdated: new Date(),
+    sensorData: {
+      motion: 1,
+      distance: 52,
+      timestamp: new Date(),
+    },
+    occupancyPercentage: 70,
+  },
+  {
+    id: 'ENG-202',
+    name: 'ENG-202',
+    building: 'Engineering Block B',
+    capacity: 80,
+    status: 'available',
+    lastUpdated: new Date(Date.now() - 180000),
+    sensorData: {
+      motion: 0,
+      distance: 115,
+      timestamp: new Date(Date.now() - 180000),
+    },
+    occupancyPercentage: 0,
+  },
+  {
+    id: 'CS-301',
+    name: 'CS-301',
+    building: 'Computer Science Building',
+    capacity: 60,
+    status: 'occupied',
+    lastUpdated: new Date(),
+    sensorData: {
+      motion: 1,
+      distance: 38,
+      timestamp: new Date(),
+    },
+    occupancyPercentage: 92,
+  },
+  {
+    id: 'CS-302',
+    name: 'CS-302',
+    building: 'Computer Science Building',
+    capacity: 60,
+    status: 'available',
+    lastUpdated: new Date(Date.now() - 120000),
+    sensorData: {
+      motion: 0,
+      distance: 125,
+      timestamp: new Date(Date.now() - 120000),
+    },
+    occupancyPercentage: 0,
+  },
+];
+
+export const mockUsagePatterns: UsagePattern[] = [
+  { hour: 8, occupancyRate: 45, day: 'Monday' },
+  { hour: 9, occupancyRate: 78, day: 'Monday' },
+  { hour: 10, occupancyRate: 92, day: 'Monday' },
+  { hour: 11, occupancyRate: 88, day: 'Monday' },
+  { hour: 12, occupancyRate: 65, day: 'Monday' },
+  { hour: 13, occupancyRate: 55, day: 'Monday' },
+  { hour: 14, occupancyRate: 82, day: 'Monday' },
+  { hour: 15, occupancyRate: 76, day: 'Monday' },
+  { hour: 16, occupancyRate: 58, day: 'Monday' },
+  { hour: 17, occupancyRate: 35, day: 'Monday' },
+];
