@@ -134,7 +134,7 @@ async def upload_image(
             return Response(content=contents, media_type=file.content_type)
 
         # ----------------------------------------------------------
-        # YOLO IMPROVED SETTINGS FOR SMALL / FAR PERSON DETECTION
+        # YOLO IMPROVED SETTINGS FOR SMALL / FAR PERSON DETECTION.
         # ----------------------------------------------------------
         results = yolo_model.predict(
             img,
