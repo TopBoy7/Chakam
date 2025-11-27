@@ -7,7 +7,7 @@ from bson import ObjectId
 class Classroom(BaseModel):
     id: Optional[str] = Field(default=None, alias="_id")
     classId: str
-    name: str  = None                  # ← NEW FIELD
+    className: str  = None                  # ← NEW FIELD
     latestImage: Optional[str] = None
     deviceId: str
     capacity: int

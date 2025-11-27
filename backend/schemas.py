@@ -5,7 +5,7 @@ from enum import Enum
 
 class CreateClassroomRequest(BaseModel):
     classId: str
-    name: str                     # ← NEW FIELD
+    className: str                     # ← NEW FIELD
     deviceId: str
     capacity: int
     occupancy: int = 0
@@ -15,7 +15,7 @@ class CreateClassroomRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "classId": "ELT",
-                "name": "Engineering Lecture Theatre 1",  # ← example
+                "className": "Engineering Lecture Theatre 1",  # ← example
                 "deviceId": "dev-00123",
                 "capacity": 150,
                 "occupancy": 0,
@@ -25,7 +25,7 @@ class CreateClassroomRequest(BaseModel):
 
 
 class UpdateClassroomRequest(BaseModel):
-    name: Union[str, None]        # ← NEW FIELD
+    className: Union[str, None]        # ← NEW FIELD
     deviceId: Union[str, None]
     capacity: Union[int, None]
     occupancy: Union[int, None]

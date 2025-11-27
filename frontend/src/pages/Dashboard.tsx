@@ -1,94 +1,119 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
+import { useClassroomWebSocket } from '@/hooks/useClassroomWebSocket';
+import { api } from '@/lib/api';
 import Navigation from '@/components/Navigation';
 import ClassroomCard from '@/components/ClassroomCard';
-import StatsCard from '@/components/StatsCard';
-import { mockClassrooms } from '@/data/mockData';
-import { Activity, CheckCircle, XCircle, TrendingUp } from 'lucide-react';
+import CreateClassroomDialog from '@/components/CreateClassroomDialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Plus, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import type { Classroom, WebSocketMessage } from '@/types/classroom';
 
 const Dashboard = () => {
-  const [classrooms, setClassrooms] = useState(mockClassrooms);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Simulate real-time updates
+  // Load initial classrooms
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLastUpdate(new Date());
-    }, 5000);
-    return () => clearInterval(interval);
+    const fetchClassrooms = async () => {
+      try {
+        setError(null);
+        const data = await api.classrooms.list();
+        setClassrooms(data);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : 'Failed to load classrooms'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchClassrooms();
   }, []);
 
-  const totalClassrooms = classrooms.length;
-  const occupiedCount = classrooms.filter((c) => c.status === 'occupied').length;
-  const availableCount = totalClassrooms - occupiedCount;
-  const occupancyRate = Math.round((occupiedCount / totalClassrooms) * 100);
+  // WebSocket listener for real-time updates
+  const handleWSMessage = useCallback((message: WebSocketMessage) => {
+    if (
+      message.event === 'classroom_updated' ||
+      message.event === 'classroom_image_update'
+    ) {
+      setClassrooms((prev) =>
+        prev.map((c) =>
+          c._id === message.classroom._id ? message.classroom : c
+        )
+      );
+    }
+  }, []);
+
+  useClassroomWebSocket(handleWSMessage);
+
+  const handleCreateClassroom = async (data: any) => {
+    try {
+      await api.classrooms.create(data);
+      const updated = await api.classrooms.list();
+      setClassrooms(updated);
+      setShowCreateDialog(false);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create classroom');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      
-      <main className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
           <div>
-            <h1 className="text-4xl font-bold mb-2">Live Dashboard</h1>
-            <p className="text-muted-foreground">
-              Real-time classroom occupancy across campus
+            <h1 className="text-3xl font-bold">Classrooms</h1>
+            <p className="text-muted-foreground mt-1">
+              Manage and monitor all classrooms
             </p>
           </div>
-          <div className="flex items-center gap-3 mt-4 md:mt-0">
-            <Badge variant="outline" className="px-3 py-1">
-              <div className="h-2 w-2 rounded-full bg-success animate-pulse mr-2" />
-              Live Updates
-            </Badge>
-            <span className="text-sm text-muted-foreground">
-              Updated {lastUpdate.toLocaleTimeString()}
-            </span>
+          <Button onClick={() => setShowCreateDialog(true)} size="lg">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Classroom
+          </Button>
+        </div>
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="inline-block">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+            <p className="mt-4 text-muted-foreground">Loading classrooms...</p>
           </div>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatsCard
-            title="Total Classrooms"
-            value={totalClassrooms}
-            description="Monitored spaces"
-            icon={Activity}
-          />
-          <StatsCard
-            title="Currently Occupied"
-            value={occupiedCount}
-            description="Active classrooms"
-            icon={XCircle}
-            className="border-warning/20"
-          />
-          <StatsCard
-            title="Available Now"
-            value={availableCount}
-            description="Free to use"
-            icon={CheckCircle}
-            className="border-success/20"
-          />
-          <StatsCard
-            title="Occupancy Rate"
-            value={`${occupancyRate}%`}
-            description="Current utilization"
-            icon={TrendingUp}
-            className="border-primary/20"
-          />
-        </div>
-
-        {/* Classroom Grid */}
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold mb-4">Classroom Status</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        ) : classrooms.length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground mb-4">No classrooms yet.</p>
+            <Button onClick={() => setShowCreateDialog(true)}>
+              Create your first classroom
+            </Button>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {classrooms.map((classroom) => (
-              <ClassroomCard key={classroom.id} classroom={classroom} />
+              <ClassroomCard key={classroom._id} classroom={classroom} />
             ))}
           </div>
-        </div>
-      </main>
+        )}
+      </div>
+
+      <CreateClassroomDialog
+        open={showCreateDialog}
+        onOpenChange={setShowCreateDialog}
+        onSubmit={handleCreateClassroom}
+      />
     </div>
   );
 };

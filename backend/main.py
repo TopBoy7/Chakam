@@ -2,6 +2,8 @@ from fastapi import (
     FastAPI, HTTPException, status,
     UploadFile, File, Form, Response, WebSocket, WebSocketDisconnect
 )
+from fastapi.middleware.cors import CORSMiddleware
+
 from typing import List
 from io import BytesIO
 import cv2
@@ -59,7 +61,13 @@ manager = ConnectionManager()
 # -------------------------------------------------------
 app = FastAPI(title="Smart Classroom - FastAPI + YOLO + MongoDB")
 
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # -------------------------------------------------------
 # WEBSOCKET ENDPOINT
 # -------------------------------------------------------

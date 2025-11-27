@@ -13,6 +13,40 @@ export interface ClassroomData {
   occupancyPercentage?: number;
 }
 
+export interface Classroom {
+  _id: string;
+  classId: string;
+  className: string;
+  capacity: number;
+  occupancy: number;
+  deviceId: string;
+  latestImage?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CreateClassroomRequest {
+  classId: string;
+  className: string;
+  capacity: number;
+  deviceId: string;
+}
+
+export interface ClassroomResponse {
+  success: boolean;
+  message: string;
+  data: {
+    classroom?: Classroom;
+    classrooms?: Classroom[];
+    id?: string;
+  };
+}
+
+export interface WebSocketMessage {
+  event: 'classroom_updated' | 'classroom_image_update';
+  classroom: Classroom;
+}
+
 export interface UsagePattern {
   hour: number;
   occupancyRate: number;
