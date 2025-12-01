@@ -305,7 +305,7 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
 
     logger.info("Broadcast payload prepared for classroom_image_update: %s", updated_dict)
 
-    # Broadcast via WebSocket
+    # Broadcast via WebSocket.
     await manager.broadcast(serialize({
         "event": "classroom_image_update",
         "classroom": updated_dict
