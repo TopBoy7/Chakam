@@ -98,7 +98,7 @@ export default function CreateClassroomDialog({
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  capacity: parseInt(e.target.value) || 50,
+                  capacity: parseInt(e.target.value) || 1,
                 })
               }
               required
