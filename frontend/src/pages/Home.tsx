@@ -1,14 +1,14 @@
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Activity, TrendingUp, Zap, Shield } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import Navigation from '@/components/Navigation';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Activity, TrendingUp, Zap, Shield } from "lucide-react";
+import { Link } from "react-router-dom";
+import Navigation from "@/components/Navigation";
 
 const Home = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-background">
+    <div className="min-h-screen w-full bg-gradient-to-br from-background via-primary/5 to-background overflow-x-hidden">
       <Navigation />
-      
+
       {/* Hero Section */}
       <section className="container mx-auto px-4 py-20">
         <div className="text-center max-w-4xl mx-auto">
@@ -20,18 +20,23 @@ const Home = () => {
             Smart Classroom Occupancy Detection System
           </h1>
           <p className="text-xl text-muted-foreground mb-8 leading-relaxed">
-            Real-time monitoring and intelligent analytics for efficient classroom management.
-            Track occupancy, analyze patterns, and optimize space utilization across campus.
+            Real-time monitoring and intelligent analytics for efficient
+            classroom management. Track occupancy, analyze patterns, and
+            optimize space utilization across campus.
           </p>
-          <div className="flex gap-4 justify-center">
-            <Link to="/dashboard">
-              <Button size="lg" className="text-base">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link to="/dashboard" className="w-full sm:w-auto">
+              <Button size="lg" className="text-base w-full sm:w-auto">
                 <Activity className="h-5 w-5 mr-2" />
                 View Dashboard
               </Button>
             </Link>
-            <Link to="/analytics">
-              <Button size="lg" variant="outline" className="text-base">
+            <Link to="/analytics" className="w-full sm:w-auto">
+              <Button
+                size="lg"
+                variant="outline"
+                className="text-base w-full sm:w-auto"
+              >
                 <TrendingUp className="h-5 w-5 mr-2" />
                 View Analytics
               </Button>
@@ -42,7 +47,9 @@ const Home = () => {
 
       {/* Features Section */}
       <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center mb-12">System Features</h2>
+        <h2 className="text-3xl font-bold text-center mb-12">
+          System Features
+        </h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card className="border-2 hover:border-primary/50 transition-all duration-300">
             <CardContent className="pt-6">
@@ -51,7 +58,8 @@ const Home = () => {
               </div>
               <h3 className="font-bold text-lg mb-2">Real-Time Monitoring</h3>
               <p className="text-muted-foreground text-sm">
-                Live classroom status updates using IoT sensors and wireless communication.
+                Live classroom status updates using IoT sensors and wireless
+                communication.
               </p>
             </CardContent>
           </Card>
@@ -63,7 +71,8 @@ const Home = () => {
               </div>
               <h3 className="font-bold text-lg mb-2">AI Analytics</h3>
               <p className="text-muted-foreground text-sm">
-                Predictive analytics and pattern recognition for optimal space planning.
+                Predictive analytics and pattern recognition for optimal space
+                planning.
               </p>
             </CardContent>
           </Card>
@@ -75,7 +84,8 @@ const Home = () => {
               </div>
               <h3 className="font-bold text-lg mb-2">Instant Updates</h3>
               <p className="text-muted-foreground text-sm">
-                Receive immediate notifications about classroom availability changes.
+                Receive immediate notifications about classroom availability
+                changes.
               </p>
             </CardContent>
           </Card>
@@ -87,7 +97,8 @@ const Home = () => {
               </div>
               <h3 className="font-bold text-lg mb-2">Reliable System</h3>
               <p className="text-muted-foreground text-sm">
-                ESP32 microcontroller with PIR and ultrasonic sensors for accurate detection.
+                ESP32 microcontroller with PIR and ultrasonic sensors for
+                accurate detection.
               </p>
             </CardContent>
           </Card>
@@ -102,20 +113,24 @@ const Home = () => {
               <h2 className="text-2xl font-bold mb-4">System Architecture</h2>
               <div className="space-y-4 text-muted-foreground">
                 <p>
-                  <strong className="text-foreground">Hardware:</strong> ESP32 microcontroller, 
-                  PIR motion sensors, and ultrasonic distance sensors for reliable occupancy detection.
+                  <strong className="text-foreground">Hardware:</strong> ESP32
+                  microcontroller, PIR motion sensors, and ultrasonic distance
+                  sensors for reliable occupancy detection.
                 </p>
                 <p>
-                  <strong className="text-foreground">Communication:</strong> Wi-Fi enabled 
-                  wireless data transmission using HTTP/MQTT protocols for real-time updates.
+                  <strong className="text-foreground">Communication:</strong>{" "}
+                  Wi-Fi enabled wireless data transmission using HTTP/MQTT
+                  protocols for real-time updates.
                 </p>
                 <p>
-                  <strong className="text-foreground">AI Integration:</strong> Machine learning 
-                  models for pattern recognition, anomaly detection, and predictive analytics.
+                  <strong className="text-foreground">AI Integration:</strong>{" "}
+                  Machine learning models for pattern recognition, anomaly
+                  detection, and predictive analytics.
                 </p>
                 <p>
-                  <strong className="text-foreground">Dashboard:</strong> React-based web interface 
-                  providing intuitive visualization of classroom status and usage metrics.
+                  <strong className="text-foreground">Dashboard:</strong>{" "}
+                  React-based web interface providing intuitive visualization of
+                  classroom status and usage metrics.
                 </p>
               </div>
             </CardContent>
@@ -127,7 +142,9 @@ const Home = () => {
       <footer className="border-t border-border mt-20">
         <div className="container mx-auto px-4 py-8">
           <div className="text-center text-muted-foreground">
-            <p className="mb-2">Smart Classroom Occupancy Detection and Monitoring System</p>
+            <p className="mb-2">
+              Smart Classroom Occupancy Detection and Monitoring System
+            </p>
             <p className="text-sm">
               Department of Computer Engineering • University of Lagos
             </p>
