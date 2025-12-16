@@ -20,8 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
 
-from send_email import send_occupancy_alert
-
+from send_email import EmailService
 
 # your existing modules (same as in your main app)
 import database, models, schemas, env
@@ -226,7 +225,7 @@ async def update_classroom(
         if is_over_after:
             print("Exceeded!")
             background_tasks.add_task(
-                send_occupancy_alert,
+                EmailService.send_occupancy_alert,
                 to_email="okefejoseph9@gmail.com",
                 class_id=classId,
                 class_name=class_name,
@@ -319,7 +318,7 @@ async def upload_image(
             if is_over_after:
                 print("Exceeded after image upload!")
                 background_tasks.add_task(
-                    send_occupancy_alert,
+                    send_occupancy_alert.send_occupancy_alert,
                     "okefejoseph9@gmail.com",
                     classId,
                     class_name,
