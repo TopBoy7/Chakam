@@ -301,7 +301,7 @@ const ClassroomDetail = () => {
             )}
 
             {/* Delete Button */}
-            <Button
+            {/* <Button
               variant="destructive"
               className="w-full"
               onClick={handleDelete}
@@ -309,7 +309,7 @@ const ClassroomDetail = () => {
             >
               <Trash2 className="h-4 w-4 mr-2" />
               {deleting ? 'Deleting...' : 'Delete Classroom'}
-            </Button>
+            </Button> */}
           </div>
         </div>
       </main>
