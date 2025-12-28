@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { api } from '@/lib/api';
-import { useClassroomWebSocket } from '@/hooks/useClassroomWebSocket';
-import Navigation from '@/components/Navigation';
-import EditClassroomDialog from '@/components/EditClassroomDialog';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, Trash2, Users, Calendar, Clock, Edit2 } from 'lucide-react';
-import { Progress } from '@/components/ui/progress';
-import type { Classroom, UpdateClassroomRequest } from '@/types/classroom';
+import { useEffect, useState } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { api } from "@/lib/api";
+import { useClassroomWebSocket } from "@/hooks/useClassroomWebSocket";
+import Navigation from "@/components/Navigation";
+import EditClassroomDialog from "@/components/EditClassroomDialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft, Trash2, Users, Calendar, Clock, Edit2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Classroom, UpdateClassroomRequest } from "@/types/classroom";
 
 const ClassroomDetail = () => {
   const { classId } = useParams<{ classId: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const [classroom, setClassroom] = useState<Classroom | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +30,9 @@ const ClassroomDetail = () => {
         const data = await api.classrooms.get(classId);
         setClassroom(data);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load classroom');
+        setError(
+          err instanceof Error ? err.message : "Failed to load classroom"
+        );
       } finally {
         setLoading(false);
       }
@@ -39,7 +43,7 @@ const ClassroomDetail = () => {
 
   // Real-time updates via WebSocket
   useClassroomWebSocket((message) => {
-    console.log('WS incoming:', message);
+    console.log("WS incoming:", message);
     const incoming = message.classroom;
     if (!classroom) return;
 
@@ -53,28 +57,29 @@ const ClassroomDetail = () => {
 
   const handleDelete = async () => {
     if (!classId) return;
-    if (!confirm('Are you sure you want to delete this classroom?')) return;
+    if (!confirm("Are you sure you want to delete this classroom?")) return;
 
     try {
       setDeleting(true);
       await api.classrooms.delete(classId);
-      navigate('/dashboard');
+      navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete classroom');
+      setError(
+        err instanceof Error ? err.message : "Failed to delete classroom"
+      );
       setDeleting(false);
     }
   };
 
-  const handleEdit = async (oldClassId: string, updateData: UpdateClassroomRequest) => {
-    try {
-      const updated = await api.classrooms.update(oldClassId, updateData);
-      setClassroom(updated);
-      // If classId changed, navigate to new URL
-      if (updateData.classId && updateData.classId !== oldClassId) {
-        navigate(`/classroom/${updateData.classId}`, {replace: true});
-      }
-    } catch (err) {
-      throw err;
+  const handleEdit = async (
+    oldClassId: string,
+    updateData: UpdateClassroomRequest
+  ) => {
+    const updated = await api.classrooms.update(oldClassId, updateData);
+    setClassroom(updated);
+    // If classId changed, navigate to new URL
+    if (updateData.classId && updateData.classId !== oldClassId) {
+      navigate(`/classroom/${updateData.classId}`, { replace: true });
     }
   };
 
@@ -118,13 +123,13 @@ const ClassroomDetail = () => {
 
   const occupancyPercent = (classroom.occupancy / classroom.capacity) * 100;
   const occupancyStatus =
-    occupancyPercent > 80 ? 'High' : occupancyPercent > 40 ? 'Medium' : 'Low';
+    occupancyPercent > 80 ? "High" : occupancyPercent > 40 ? "Medium" : "Low";
   const statusColor =
     occupancyPercent > 80
-      ? 'text-red-600'
+      ? "text-red-600"
       : occupancyPercent > 40
-        ? 'text-yellow-600'
-        : 'text-green-600';
+      ? "text-yellow-600"
+      : "text-green-600";
 
   const lastUpdated = classroom.updatedAt
     ? new Date(classroom.updatedAt)
@@ -160,8 +165,7 @@ const ClassroomDetail = () => {
                     {lastUpdated && (
                       <p className="text-sm text-muted-foreground flex items-center gap-2">
                         <Clock className="h-4 w-4" />
-                        Last updated:{' '}
-                        {lastUpdated.toLocaleString()}
+                        Last updated: {lastUpdated.toLocaleString()}
                       </p>
                     )}
                   </div>
@@ -189,18 +193,22 @@ const ClassroomDetail = () => {
                     Class ID: {classroom.classId}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowEditDialog(true)}
-                  title="Edit classroom details"
-                >
-                  <Edit2 className="h-4 w-4" />
-                </Button>
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowEditDialog(true)}
+                    title="Edit classroom details"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
+                )}
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <p className="text-sm text-muted-foreground mb-1">Device ID</p>
+                  <p className="text-sm text-muted-foreground mb-1">
+                    Device ID
+                  </p>
                   <p className="font-mono text-sm bg-muted px-2 py-1 rounded">
                     {classroom.deviceId}
                   </p>
@@ -250,9 +258,7 @@ const ClassroomDetail = () => {
                     <p className="text-xs text-muted-foreground mb-1">
                       Currently
                     </p>
-                    <p className="text-2xl font-bold">
-                      {classroom.occupancy}
-                    </p>
+                    <p className="text-2xl font-bold">{classroom.occupancy}</p>
                   </div>
                   <div className="p-3 rounded-lg bg-amber-100 dark:bg-amber-900/30 col-span-2">
                     <p className="text-xs text-muted-foreground mb-1">
@@ -274,9 +280,7 @@ const ClassroomDetail = () => {
                     <div className="flex items-center gap-2 text-sm">
                       <Calendar className="h-4 w-4 text-muted-foreground" />
                       <div>
-                        <p className="text-xs text-muted-foreground">
-                          Created
-                        </p>
+                        <p className="text-xs text-muted-foreground">Created</p>
                         <p className="font-mono text-xs">
                           {new Date(classroom.createdAt).toLocaleString()}
                         </p>
@@ -301,15 +305,17 @@ const ClassroomDetail = () => {
             )}
 
             {/* Delete Button */}
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              {deleting ? 'Deleting...' : 'Delete Classroom'}
-            </Button>
+            {isAdmin && (
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {deleting ? "Deleting..." : "Delete Classroom"}
+              </Button>
+            )}
           </div>
         </div>
       </main>

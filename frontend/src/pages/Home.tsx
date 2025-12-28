@@ -1,10 +1,44 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Activity, TrendingUp, Zap, Shield } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Activity, TrendingUp, Zap, Shield, LogIn, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import Navigation from "@/components/Navigation";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Home = () => {
+  const { isAdmin, login, logout } = useAuth();
+  const navigate = useNavigate();
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (login(password)) {
+      setError("");
+      setPassword("");
+      setDialogOpen(false);
+      navigate("/dashboard");
+    } else {
+      setError("Invalid password");
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+  };
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-background via-primary/5 to-background overflow-x-hidden">
       <Navigation />
@@ -23,7 +57,7 @@ const Home = () => {
             classroom management. Track occupancy, analyze patterns, and
             optimize space utilization across campus.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
             <Link to="/dashboard" className="w-full sm:w-auto">
               <Button size="lg" className="text-base w-full sm:w-auto">
                 <Activity className="h-5 w-5 mr-2" />
@@ -40,6 +74,59 @@ const Home = () => {
                 View Analytics
               </Button>
             </Link>
+            {isAdmin ? (
+              <Button
+                size="lg"
+                variant="destructive"
+                className="text-base w-full sm:w-auto"
+                onClick={handleLogout}
+              >
+                <LogOut className="h-5 w-5 mr-2" />
+                Logout
+              </Button>
+            ) : (
+              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    className="text-base w-full sm:w-auto"
+                  >
+                    <LogIn className="h-5 w-5 mr-2" />
+                    Admin Login
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Admin Login</DialogTitle>
+                    <DialogDescription>
+                      Enter the admin password to manage classrooms.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="Enter admin password"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          setError("");
+                        }}
+                      />
+                      {error && (
+                        <p className="text-sm text-destructive">{error}</p>
+                      )}
+                    </div>
+                    <Button type="submit" className="w-full">
+                      Login
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
         </div>
       </section>

@@ -1,15 +1,17 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useClassroomWebSocket } from '@/hooks/useClassroomWebSocket';
-import { api } from '@/lib/api';
-import Navigation from '@/components/Navigation';
-import ClassroomCard from '@/components/ClassroomCard';
-import CreateClassroomDialog from '@/components/CreateClassroomDialog';
-import { Button } from '@/components/ui/button';
-import { Plus, AlertCircle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import type { Classroom, WebSocketMessage } from '@/types/classroom';
+import { useEffect, useState, useCallback } from "react";
+import { useClassroomWebSocket } from "@/hooks/useClassroomWebSocket";
+import { api } from "@/lib/api";
+import Navigation from "@/components/Navigation";
+import ClassroomCard from "@/components/ClassroomCard";
+import CreateClassroomDialog from "@/components/CreateClassroomDialog";
+import { Button } from "@/components/ui/button";
+import { Plus, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Classroom, WebSocketMessage } from "@/types/classroom";
 
 const Dashboard = () => {
+  const { isAdmin } = useAuth();
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -24,7 +26,7 @@ const Dashboard = () => {
         setClassrooms(data);
       } catch (err) {
         setError(
-          err instanceof Error ? err.message : 'Failed to load classrooms'
+          err instanceof Error ? err.message : "Failed to load classrooms"
         );
       } finally {
         setLoading(false);
@@ -53,7 +55,7 @@ const Dashboard = () => {
 
   useClassroomWebSocket(handleWSMessage);
 
-  const handleCreateClassroom = async (data: any) => {
+  const handleCreateClassroom = async (data: Classroom) => {
     try {
       await api.classrooms.create(data);
       const updated = await api.classrooms.list();
@@ -61,7 +63,9 @@ const Dashboard = () => {
       setShowCreateDialog(false);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create classroom');
+      setError(
+        err instanceof Error ? err.message : "Failed to create classroom"
+      );
     }
   };
 
@@ -76,10 +80,12 @@ const Dashboard = () => {
               Manage and monitor all classrooms
             </p>
           </div>
-          <Button onClick={() => setShowCreateDialog(true)} size="lg">
-            <Plus className="h-4 w-4 mr-2" />
-            Add Classroom
-          </Button>
+          {isAdmin && (
+            <Button onClick={() => setShowCreateDialog(true)} size="lg">
+              <Plus className="h-4 w-4 mr-2" />
+              Add Classroom
+            </Button>
+          )}
         </div>
 
         {error && (
@@ -99,9 +105,11 @@ const Dashboard = () => {
         ) : classrooms.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-muted-foreground mb-4">No classrooms yet.</p>
-            <Button onClick={() => setShowCreateDialog(true)}>
-              Create your first classroom
-            </Button>
+            {isAdmin && (
+              <Button onClick={() => setShowCreateDialog(true)}>
+                Create your first classroom
+              </Button>
+            )}
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">

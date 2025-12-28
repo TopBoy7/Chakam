@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import Navigation from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, Clock, Calendar, BarChart3 } from "lucide-react";
@@ -12,35 +13,81 @@ import {
   LineChart,
   Line,
 } from "recharts";
+import { api } from "@/lib/api";
+import type { Classroom } from "@/types/classroom";
 
 interface UsagePattern {
   hour: number;
   occupancyRate: number;
 }
 
-interface Classroom {
-  id: string;
-  name: string;
-  occupancyPercentage: number;
-}
+// Generate mock usage patterns based on classroom data
+const generateUsagePatterns = (classrooms: Classroom[]): UsagePattern[] => {
+  const hours = Array.from({ length: 12 }, (_, i) => i + 8); // 8 AM to 7 PM
+  return hours.map((hour) => ({
+    hour,
+    occupancyRate: Math.round(
+      classrooms.length > 0
+        ? classrooms.reduce(
+            (sum, c) => sum + (c.occupancy / c.capacity) * 100,
+            0
+          ) /
+            classrooms.length +
+            Math.sin((hour - 8) * 0.5) * 20 // Add some variation
+        : 0
+    ),
+  }));
+};
 
-interface AnalyticsProps {
-  classrooms: Classroom[];
-  usagePatterns: UsagePattern[];
-  weeklyData?: Array<{ day: string; occupancy: number }>;
-}
+// Generate mock weekly data
+const generateWeeklyData = (classrooms: Classroom[]) => {
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const baseOccupancy =
+    classrooms.length > 0
+      ? classrooms.reduce(
+          (sum, c) => sum + (c.occupancy / c.capacity) * 100,
+          0
+        ) / classrooms.length
+      : 0;
+  return days.map((day, i) => ({
+    day,
+    occupancy: Math.round(
+      baseOccupancy + (Math.random() - 0.5) * 20 + (i < 5 ? 10 : -20)
+    ),
+  }));
+};
 
-const Analytics = ({
-  classrooms = [],
-  usagePatterns = [],
-  weeklyData = [],
-}: AnalyticsProps) => {
+const Analytics = () => {
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [usagePatterns, setUsagePatterns] = useState<UsagePattern[]>([]);
+  const [weeklyData, setWeeklyData] = useState<
+    Array<{ day: string; occupancy: number }>
+  >([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const data = await api.classrooms.list();
+        setClassrooms(data);
+        setUsagePatterns(generateUsagePatterns(data));
+        setWeeklyData(generateWeeklyData(data));
+      } catch (error) {
+        console.error("Failed to fetch classrooms:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
   // Calculate average occupancy
   const avgOccupancy =
     classrooms.length > 0
       ? Math.round(
-          classrooms.reduce((sum, c) => sum + (c.occupancyPercentage || 0), 0) /
-            classrooms.length
+          classrooms.reduce(
+            (sum, c) => sum + (c.occupancy / c.capacity) * 100,
+            0
+          ) / classrooms.length
         )
       : 0;
 
@@ -62,6 +109,20 @@ const Analytics = ({
             100
         )
       : 0;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="flex items-center justify-center h-96">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading analytics...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
