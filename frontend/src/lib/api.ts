@@ -23,7 +23,7 @@
 // The frontend reads `detail` from error responses and shows it in the UI.
 // =============================================================================
 
-import type { Course, RegisteredStudent, Session, AttendanceRecord } from '@/types/attendance';
+import type { Course, RegisteredStudent, Session, AttendanceRecord, StudentAttendanceSummary } from '@/types/attendance';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const WS_BASE  = import.meta.env.VITE_WS_URL       || 'ws://localhost:8000';
@@ -455,6 +455,88 @@ export const api = {
           const d = await res.json();
           throw new Error(d?.detail || 'Failed to update attendance');
         }
+      },
+
+      /**
+       * POST /attendance/sessions/:sessionId/capture
+       *
+       * On-demand attendance capture. Called when the lecturer taps "Take Attendance".
+       * This replaces the old periodic-snapshot model — the lecturer decides the exact
+       * moment to capture, so there are no late-arrival edge cases.
+       *
+       * Backend must:
+       *   1. Retrieve the session and verify it is still active (return 400 if ended).
+       *   2. Look up the classroom via session.classroomId → get classroom.deviceId.
+       *   3. Signal the physical camera (identified by deviceId) to capture a snapshot NOW.
+       *      Recommendation: take 2–3 frames over ~90 seconds and union the detections —
+       *      this guards against a single bad frame (blinks, movement, occlusion).
+       *   4. Run facial recognition on the captured frame(s) against all registered
+       *      student photos for this course.
+       *   5. For each matched student:
+       *        a. If no attendance record exists → create one (status: "present", manuallyOverridden: false)
+       *        b. If record exists and manuallyOverridden is false → update to "present"
+       *        c. If record exists and manuallyOverridden is true → DO NOT touch (respect lecturer override)
+       *   6. Return the full updated attendance list.
+       *
+       * Response shape:
+       *   { data: { records: AttendanceRecord[] } }
+       *
+       * Return 400 if session is not active.
+       * Return 503 with { detail: "Camera unreachable" } if the device cannot be contacted.
+       */
+      capture: async (sessionId: string): Promise<AttendanceRecord[]> => {
+        const res = await fetch(
+          `${API_BASE}/attendance/sessions/${sessionId}/capture`,
+          { method: 'POST' }
+        );
+        if (!res.ok) {
+          const d = await res.json();
+          throw new Error(d?.detail || 'Failed to capture attendance');
+        }
+        const data = await res.json();
+        return data.data.records;
+      },
+    },
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STUDENT PORTAL  (public — no auth)
+    // ─────────────────────────────────────────────────────────────────────────
+    portal: {
+
+      /**
+       * GET /attendance/students/lookup/:matricNumber
+       *
+       * Public endpoint — no authentication required. Used by the /my-attendance
+       * page where a student checks their own attendance history by matric number.
+       *
+       * Backend must:
+       *   1. Find all RegisteredStudent documents where matricNumber matches
+       *      (case-insensitive). A student may be registered for multiple courses.
+       *   2. For each course, find all ended Session documents.
+       *   3. For each session, find the AttendanceRecord for this student (if any).
+       *      Students with no record for a session count as absent.
+       *   4. Compute attendanceRate = (presentCount / totalSessions) * 100 per course.
+       *   5. Return aggregated results grouped by course.
+       *
+       * Response shape:
+       *   { data: { results: StudentAttendanceSummary[] } }
+       *
+       * Return 404 with { detail: "No student found with this matric number" }
+       *   if the matric number does not exist in any course.
+       *
+       * NOTE: This endpoint is intentionally public. Matric numbers are not secret —
+       *   they appear on ID cards. The data returned is the student's own attendance,
+       *   not anyone else's. If you want stricter privacy, add a PIN or OTP step.
+       */
+      lookup: async (matricNumber: string): Promise<StudentAttendanceSummary[]> => {
+        const encoded = encodeURIComponent(matricNumber.trim().toUpperCase());
+        const res = await fetch(`${API_BASE}/attendance/students/lookup/${encoded}`);
+        if (!res.ok) {
+          const d = await res.json();
+          throw new Error(d?.detail || 'No records found for this matric number');
+        }
+        const data = await res.json();
+        return data.data.results;
       },
     },
   },

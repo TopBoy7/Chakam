@@ -22,11 +22,14 @@ const Navigation = () => {
     { to: "/dashboard", label: "Dashboard" },
     { to: "/analytics", label: "Analytics" },
     { to: "/attendance", label: "Attendance" },
+    { to: "/my-attendance", label: "My Attendance" },
   ];
 
   const isActive = (to: string) => {
     if (to === "/attendance")
       return location.pathname === "/attendance" || location.pathname.startsWith("/attendance/");
+    if (to === "/my-attendance")
+      return location.pathname === "/my-attendance";
     return location.pathname === to;
   };
 

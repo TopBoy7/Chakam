@@ -1,41 +1,25 @@
 // =============================================================================
 // PAGE: /register/:token  — Public student self-registration
 // =============================================================================
-// What this page does:
-//   - Resolves the registration token in the URL to a course
-//       GET /attendance/register/:token  → returns the Course object
-//     This is a PUBLIC endpoint — no authentication required. Students open
-//     a link shared by their lecturer and land here directly.
-//   - Shows a form where the student enters their matric number and uploads
-//     a passport-style photo of their face.
-//   - On submit, sends the form to:
-//       POST /attendance/courses/:courseId/register  (multipart/form-data)
-//       Fields: matricNumber (string), photo (File — JPEG or PNG)
-//   - Shows a success screen once the backend confirms registration.
+// Flow:
+//   1. Resolve token → course via GET /attendance/register/:token  (public)
+//   2. Student enters matric number and uploads UP TO 5 passport photos
+//   3. Submit → POST /attendance/courses/:courseId/register  (multipart/form-data)
+//        Fields: matricNumber (string), photos (File[] — up to 5 JPEG/PNG images)
 //
-// TOKEN vs COURSE ID:
-//   The URL contains the `registrationToken` (a UUID), NOT the courseId.
-//   This is intentional — tokens are random and unguessable, unlike sequential IDs.
-//   The backend needs TWO endpoints:
-//     1. GET /attendance/register/:token
-//        Looks up the course by registrationToken, returns the Course object.
-//        Used here to show the course name before the student submits.
-//        Return 404 if the token doesn't match any course.
-//     2. POST /attendance/courses/:courseId/register  (already documented in api.ts)
-//        The actual registration submission. courseId comes from the Course
-//        object returned by step 1.
+// WHY MULTIPLE PHOTOS:
+//   A single reference photo is fragile — lighting, angle, hairstyle changes between
+//   registration day and class day all reduce match accuracy. Multiple photos (e.g.
+//   front, slight left, slight right, with/without glasses) give the recognition model
+//   multiple embeddings to compare against, significantly improving hit rate.
 //
-// PHOTO STORAGE:
-//   The backend should store the uploaded photo in Cloudinary (same approach as
-//   classroom images) and save the secure_url as the student's `photoUrl`.
-//   Optionally, compute a face embedding from the photo at registration time and
-//   cache it — this speeds up facial recognition during live sessions.
-//
-// ERROR STATES:
-//   - Invalid/unknown token → "Link not found" screen
-//   - Duplicate matric number for same course → show the backend's error message
-//     (backend should return 409 with { detail: "Already registered" })
-//   - Network/server error → inline error alert, form stays visible for retry
+// BACKEND NOTE for /register endpoint:
+//   - Accept `photos` as a multi-file field (not `photo`) — FormData will have
+//     multiple entries all keyed "photos".
+//   - Upload each to Cloudinary, store all URLs in an array field (e.g. photoUrls[]).
+//   - Compute face embeddings for EACH photo and store them all — the recognition
+//     pipeline should match against the closest embedding rather than a single one.
+//   - Still enforce duplicate matricNumber per course → 409 Conflict.
 // =============================================================================
 
 import { useEffect, useState, useRef } from "react";
@@ -46,25 +30,26 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Camera, CheckCircle2, Upload, AlertCircle, RefreshCw } from "lucide-react";
+import { Camera, CheckCircle2, Upload, AlertCircle, RefreshCw, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Course } from "@/types/attendance";
 
+const MAX_PHOTOS = 5;
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const StudentRegistration = () => {
   const { token } = useParams<{ token: string }>();
 
-  const [course, setCourse] = useState<Course | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [course, setCourse]         = useState<Course | null>(null);
+  const [loading, setLoading]       = useState(true);
   const [courseError, setCourseError] = useState<string | null>(null);
 
   const [matricNumber, setMatricNumber] = useState("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [photoFiles, setPhotoFiles]     = useState<File[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  const [submitting, setSubmitting]     = useState(false);
+  const [submitted, setSubmitted]       = useState(false);
+  const [submitError, setSubmitError]   = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -80,9 +65,7 @@ const StudentRegistration = () => {
         const data = await res.json();
         setCourse(data.data.course);
       } catch (err) {
-        setCourseError(
-          err instanceof Error ? err.message : "Failed to load registration info"
-        );
+        setCourseError(err instanceof Error ? err.message : "Failed to load registration info");
       } finally {
         setLoading(false);
       }
@@ -91,29 +74,52 @@ const StudentRegistration = () => {
   }, [token]);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+    const incoming = Array.from(e.target.files ?? []);
+    if (!incoming.length) return;
+
+    setPhotoFiles((prev) => {
+      const combined = [...prev, ...incoming].slice(0, MAX_PHOTOS);
+      // Regenerate all previews
+      combined.forEach((file, i) => {
+        if (i >= prev.length) {
+          const reader = new FileReader();
+          reader.onload = (ev) =>
+            setPhotoPreviews((p) => {
+              const next = [...p];
+              next[i] = ev.target?.result as string;
+              return next;
+            });
+          reader.readAsDataURL(file);
+        }
+      });
+      return combined;
+    });
+    // Reset input so the same file can be re-added after removal
+    e.target.value = "";
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotoFiles((prev) => prev.filter((_, i) => i !== index));
+    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || !matricNumber.trim() || !photoFile) return;
+    if (!course || !matricNumber.trim() || photoFiles.length === 0) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const formData = new FormData();
       formData.append("matricNumber", matricNumber.trim().toUpperCase());
-      formData.append("photo", photoFile);
+      // Append all photos under the key "photos" (array).
+      // BACKEND: accept photos as a multi-file field — iterate request.files.getlist("photos")
+      for (const file of photoFiles) {
+        formData.append("photos", file);
+      }
       await api.attendance.students.register(course.id, formData);
       setSubmitted(true);
     } catch (err) {
-      setSubmitError(
-        err instanceof Error ? err.message : "Registration failed. Please try again."
-      );
+      setSubmitError(err instanceof Error ? err.message : "Registration failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -124,8 +130,8 @@ const StudentRegistration = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
-          <p className="mt-4 text-muted-foreground">Loading registration...</p>
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin mx-auto" />
+          <p className="mt-4 text-sm text-muted-foreground">Loading registration…</p>
         </div>
       </div>
     );
@@ -139,7 +145,7 @@ const StudentRegistration = () => {
           <CardContent className="pt-8 pb-8 text-center space-y-4">
             <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
             <div>
-              <h2 className="text-lg font-semibold">Link not found</h2>
+              <h2 className="font-serif text-xl">Link not found</h2>
               <p className="text-muted-foreground text-sm mt-1">
                 {courseError || "This registration link is invalid or has expired."}
               </p>
@@ -156,14 +162,12 @@ const StudentRegistration = () => {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md text-center">
           <CardContent className="pt-10 pb-10 space-y-4">
-            <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
+            <CheckCircle2 className="h-16 w-16 text-success mx-auto" />
             <div>
-              <h2 className="text-2xl font-bold">You're registered!</h2>
-              <p className="text-muted-foreground mt-2 leading-relaxed max-w-xs mx-auto">
-                Your attendance for{" "}
-                <span className="font-semibold text-foreground">{course.courseCode}</span>{" "}
-                will be tracked automatically when you attend class. No further action
-                needed.
+              <h2 className="font-serif text-2xl">You're registered!</h2>
+              <p className="text-muted-foreground mt-2 leading-relaxed max-w-xs mx-auto text-sm">
+                Your lecturer will capture attendance during class — you just need to be present
+                and facing the camera when they trigger it.
               </p>
             </div>
             <Badge variant="secondary" className="font-mono text-sm px-3 py-1">
@@ -179,26 +183,26 @@ const StudentRegistration = () => {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
-        {/* Branding + Course Info */}
+        {/* Branding */}
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 mb-5">
             <img src="/cam.png" alt="Chakam" className="h-8 w-8 img-foreground" />
-            <span className="text-xl font-bold">Chakam</span>
+            <span className="font-serif text-xl text-foreground">Chakam</span>
           </div>
           <Badge variant="secondary" className="font-mono text-sm px-3 py-1">
             {course.courseCode}
           </Badge>
-          <h1 className="text-xl font-semibold">{course.courseName}</h1>
+          <h1 className="font-serif text-xl">{course.courseName}</h1>
           <p className="text-muted-foreground text-sm">Student Attendance Registration</p>
         </div>
 
         {/* Form Card */}
         <Card>
           <CardHeader className="pb-4">
-            <CardTitle className="text-base">Register for attendance tracking</CardTitle>
-            <CardDescription>
-              Your photo will be used by the classroom camera to automatically mark you
-              present during lectures. You only need to do this once.
+            <CardTitle className="font-serif text-lg font-normal">Register for attendance tracking</CardTitle>
+            <CardDescription className="text-sm">
+              Your photos will be used to identify you when your lecturer captures attendance.
+              You only need to do this once.
             </CardDescription>
           </CardHeader>
 
@@ -206,65 +210,84 @@ const StudentRegistration = () => {
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Matric Number */}
               <div className="space-y-2">
-                <Label htmlFor="matric">Matric Number</Label>
+                <Label htmlFor="matric" className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Matric Number
+                </Label>
                 <Input
                   id="matric"
                   placeholder="e.g. 19/30CS/01234"
                   value={matricNumber}
                   onChange={(e) => setMatricNumber(e.target.value)}
                   required
-                  className="font-mono"
+                  className="font-mono bg-background"
                 />
               </div>
 
-              {/* Photo Upload */}
+              {/* Multi-photo Upload */}
               <div className="space-y-2">
-                <Label>Passport Photograph</Label>
+                <Label className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Passport Photos ({photoFiles.length}/{MAX_PHOTOS})
+                </Label>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Use a clear, front-facing photo with good lighting. Your full face must
-                  be visible and unobstructed — no sunglasses or hats.
+                  Upload up to {MAX_PHOTOS} clear, front-facing photos — different angles and
+                  lighting improve recognition accuracy. No sunglasses or hats.
                 </p>
 
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => fileInputRef.current?.click()}
-                  onKeyDown={(e) =>
-                    (e.key === "Enter" || e.key === " ") && fileInputRef.current?.click()
-                  }
-                  className="border-2 border-dashed border-border rounded-lg p-5 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {photoPreview ? (
-                    <div className="flex flex-col items-center gap-3">
-                      <img
-                        src={photoPreview}
-                        alt="Preview"
-                        className="h-32 w-32 rounded-full object-cover mx-auto ring-2 ring-border"
-                      />
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        Click to change photo
+                {/* Preview grid */}
+                {photoPreviews.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {photoPreviews.map((src, i) => (
+                      <div key={i} className="relative group">
+                        <img
+                          src={src}
+                          alt={`Photo ${i + 1}`}
+                          className="h-24 w-full rounded-lg object-cover border border-border"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(i)}
+                          className="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label={`Remove photo ${i + 1}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 py-4">
-                      <Camera className="h-12 w-12 text-muted-foreground/60" />
+                    ))}
+                  </div>
+                )}
+
+                {/* Upload area */}
+                {photoFiles.length < MAX_PHOTOS && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => fileInputRef.current?.click()}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-border rounded-lg p-5 cursor-pointer hover:border-primary hover:bg-primary/5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="flex flex-col items-center gap-3 py-2">
+                      {photoFiles.length > 0 ? (
+                        <RefreshCw className="h-8 w-8 text-muted-foreground/60" />
+                      ) : (
+                        <Camera className="h-8 w-8 text-muted-foreground/60" />
+                      )}
                       <div className="text-center space-y-1">
-                        <p className="text-sm font-medium">Click to upload photo</p>
-                        <p className="text-xs text-muted-foreground">
-                          JPG or PNG, up to 5 MB
+                        <p className="text-sm font-medium">
+                          {photoFiles.length === 0 ? "Click to upload photos" : "Add more photos"}
                         </p>
+                        <p className="text-xs text-muted-foreground">JPG or PNG, up to 5 MB each</p>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
+                  multiple
                   className="hidden"
-                  aria-label="Upload passport photograph"
+                  aria-label="Upload passport photographs"
                   onChange={handlePhotoChange}
                 />
               </div>
@@ -280,18 +303,12 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || !matricNumber.trim() || !photoFile}
+                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0}
               >
                 {submitting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />
-                    Registering...
-                  </>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>
                 ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Register
-                  </>
+                  <><Upload className="h-4 w-4 mr-2" />Register</>
                 )}
               </Button>
             </form>
@@ -299,8 +316,7 @@ const StudentRegistration = () => {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground px-4">
-          Your photo is stored securely and used only for attendance verification in
-          this course.
+          Your photos are stored securely and used only for attendance verification in this course.
         </p>
       </div>
     </div>

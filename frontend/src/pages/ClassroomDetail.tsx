@@ -4,321 +4,297 @@ import { api } from "@/lib/api";
 import { useClassroomWebSocket } from "@/hooks/useClassroomWebSocket";
 import Navigation from "@/components/Navigation";
 import EditClassroomDialog from "@/components/EditClassroomDialog";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowLeft, Trash2, Users, Calendar, Clock, Edit2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ChevronLeft, Trash2, Users, Calendar, Clock, Edit2, AlertCircle, Cpu } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Classroom, UpdateClassroomRequest } from "@/types/classroom";
+
+// Status colour uses design tokens — no hardcoded Tailwind colour classes.
+function statusInfo(pct: number): { label: string; cls: string } {
+  if (pct === 0) return { label: "Empty",    cls: "text-muted-foreground" };
+  if (pct < 50)  return { label: "Low",      cls: "text-success" };
+  if (pct < 80)  return { label: "Moderate", cls: "text-warning" };
+  return              { label: "High",     cls: "text-destructive" };
+}
 
 const ClassroomDetail = () => {
   const { classId } = useParams<{ classId: string }>();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
-  const [classroom, setClassroom] = useState<Classroom | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [showEditDialog, setShowEditDialog] = useState(false);
+
+  const [classroom, setClassroom]         = useState<Classroom | null>(null);
+  const [loading, setLoading]             = useState(true);
+  const [error, setError]                 = useState<string | null>(null);
+  const [deleting, setDeleting]           = useState(false);
+  const [showEditDialog, setShowEditDialog]   = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
-    const fetchClassroom = async () => {
+    const fetch = async () => {
       if (!classId) return;
-
       try {
         setError(null);
         const data = await api.classrooms.get(classId);
         setClassroom(data);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load classroom"
-        );
+        setError(err instanceof Error ? err.message : "Failed to load classroom");
       } finally {
         setLoading(false);
       }
     };
-
-    fetchClassroom();
+    fetch();
   }, [classId]);
 
-  // Real-time updates via WebSocket
+  // Real-time occupancy updates via WebSocket.
+  // The backend broadcasts classroom_updated events whenever the IoT camera
+  // sends a new occupancy reading. No polling needed — just update state.
   useClassroomWebSocket((message) => {
-    console.log("WS incoming:", message);
     const incoming = message.classroom;
     if (!classroom) return;
-
-    if (
-      incoming._id === classroom.id ||
-      incoming.classId === classroom.classId
-    ) {
+    if (incoming._id === classroom.id || incoming.classId === classroom.classId) {
       setClassroom(incoming);
     }
   });
 
   const handleDelete = async () => {
     if (!classId) return;
-    if (!confirm("Are you sure you want to delete this classroom?")) return;
-
+    setDeleting(true);
     try {
-      setDeleting(true);
       await api.classrooms.delete(classId);
       navigate("/dashboard");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to delete classroom"
-      );
+      setError(err instanceof Error ? err.message : "Failed to delete classroom");
       setDeleting(false);
     }
   };
 
-  const handleEdit = async (
-    oldClassId: string,
-    updateData: UpdateClassroomRequest
-  ) => {
+  const handleEdit = async (oldClassId: string, updateData: UpdateClassroomRequest) => {
     const updated = await api.classrooms.update(oldClassId, updateData);
     setClassroom(updated);
-    // If classId changed, navigate to new URL
     if (updateData.classId && updateData.classId !== oldClassId) {
       navigate(`/classroom/${updateData.classId}`, { replace: true });
     }
   };
 
-  if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p>Loading classroom...</p>
-        </div>
-      </div>
-    );
-
-  if (error)
+  // ── Loading ────────────────────────────────────────────────────────────────
+  if (loading) {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
-        <div className="container mx-auto px-4 py-8">
-          <Link to="/dashboard">
-            <Button variant="outline" className="mb-6">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </Link>
-          <div className="text-center">
-            <div className="text-red-600 mb-4">{error}</div>
-            <Link to="/dashboard">
-              <Button>Return to Dashboard</Button>
-            </Link>
-          </div>
+        <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+          <p className="text-sm text-muted-foreground tracking-wide">Loading classroom…</p>
         </div>
       </div>
     );
+  }
 
-  if (!classroom)
+  // ── Error ──────────────────────────────────────────────────────────────────
+  if (error && !classroom) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        Classroom not found
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="max-w-lg mx-auto px-6 pt-28">
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-1 text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Back to Dashboard
+          </Link>
+        </div>
       </div>
     );
+  }
 
-  const occupancyPercent = (classroom.occupancy / classroom.capacity) * 100;
-  const occupancyStatus =
-    occupancyPercent > 80 ? "High" : occupancyPercent > 40 ? "Medium" : "Low";
-  const statusColor =
-    occupancyPercent > 80
-      ? "text-red-600"
-      : occupancyPercent > 40
-      ? "text-yellow-600"
-      : "text-green-600";
+  if (!classroom) return null;
 
-  const lastUpdated = classroom.updatedAt
-    ? new Date(classroom.updatedAt)
-    : null;
+  const pct = classroom.capacity > 0
+    ? Math.round((classroom.occupancy / classroom.capacity) * 100)
+    : 0;
+  const { label: statusLabel, cls: statusCls } = statusInfo(pct);
+  const lastUpdated = classroom.updatedAt ? new Date(classroom.updatedAt) : null;
 
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
 
-      <main className="container mx-auto px-4 py-8">
-        <Link to="/dashboard">
-          <Button variant="outline" className="mb-6">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Dashboard
-          </Button>
+      <div className="max-w-7xl mx-auto px-6 pt-28 pb-16">
+        {/* Breadcrumb */}
+        <Link
+          to="/dashboard"
+          className="inline-flex items-center gap-1 text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors mb-10"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+          All Classrooms
         </Link>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          {/* Left: Image */}
-          <div className="md:col-span-2">
-            <Card className="border-2">
-              <CardHeader>
-                <CardTitle>Latest Camera Feed</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {classroom.latestImage ? (
-                  <div className="space-y-4">
-                    <img
-                      src={classroom.latestImage}
-                      alt="Latest classroom image"
-                      className="w-full h-auto rounded-lg border border-border"
-                    />
-                    {lastUpdated && (
-                      <p className="text-sm text-muted-foreground flex items-center gap-2">
-                        <Clock className="h-4 w-4" />
-                        Last updated: {lastUpdated.toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="w-full h-96 bg-muted rounded-lg flex items-center justify-center">
-                    <p className="text-muted-foreground">
-                      No image available yet
-                    </p>
-                  </div>
+        {/* Page header */}
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-4">
+          <div>
+            <p className="text-xs font-mono text-muted-foreground mb-1">{classroom.classId}</p>
+            <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl text-foreground">
+              {classroom.className}
+            </h1>
+          </div>
+          {isAdmin && (
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowEditDialog(true)}
+                className="inline-flex items-center gap-2 border border-border text-xs tracking-widest uppercase px-5 py-2.5 rounded-full text-muted-foreground hover:border-foreground hover:text-foreground transition-colors"
+              >
+                <Edit2 className="h-3.5 w-3.5" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowDeleteDialog(true)}
+                className="inline-flex items-center gap-2 border border-destructive/40 text-xs tracking-widest uppercase px-5 py-2.5 rounded-full text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="h-px bg-border mb-10" />
+
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* ── Left: Camera feed ──────────────────────────────────────────── */}
+          <div className="lg:col-span-2">
+            <div className="border border-border rounded-lg bg-card/60 overflow-hidden">
+              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+                <p className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Latest Camera Feed
+                </p>
+                {lastUpdated && (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    {lastUpdated.toLocaleString()}
+                  </span>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+              {classroom.latestImage ? (
+                <img
+                  src={classroom.latestImage}
+                  alt="Latest classroom capture"
+                  className="w-full h-auto"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-72 text-muted-foreground/40">
+                  <div className="text-center">
+                    <div className="text-4xl mb-3">📷</div>
+                    <p className="text-sm">No image received yet</p>
+                    <p className="text-xs mt-1">The camera will send its first frame shortly</p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Right: Info */}
+          {/* ── Right: Info panels ─────────────────────────────────────────── */}
           <div className="space-y-4">
-            {/* Basic Info Card */}
-            <Card className="border-2">
-              <CardHeader className="flex flex-row items-start justify-between pb-3">
-                <div>
-                  <CardTitle className="text-2xl">
-                    {classroom.className}
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Class ID: {classroom.classId}
-                  </p>
-                </div>
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowEditDialog(true)}
-                    title="Edit classroom details"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </Button>
-                )}
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-1">
-                    Device ID
-                  </p>
-                  <p className="font-mono text-sm bg-muted px-2 py-1 rounded">
-                    {classroom.deviceId}
-                  </p>
-                </div>
 
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2">
-                    Occupancy
+            {/* Occupancy card */}
+            <div className="border border-border rounded-lg bg-card/60 p-6 space-y-5">
+              <p className="text-xs tracking-widest uppercase text-muted-foreground">
+                Live Occupancy
+              </p>
+
+              <div className="flex items-baseline gap-2">
+                <span className="font-serif text-5xl text-foreground">{classroom.occupancy}</span>
+                <span className="text-muted-foreground text-lg">/ {classroom.capacity}</span>
+              </div>
+
+              <Progress value={pct} className="h-1.5" />
+
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{pct}% full</span>
+                <span className={`font-medium ${statusCls}`}>{statusLabel}</span>
+              </div>
+
+              {/* Stat grid */}
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-border">
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Capacity</p>
+                  <p className="font-serif text-2xl flex items-center gap-1.5">
+                    <Users className="h-4 w-4 text-muted-foreground" />
+                    {classroom.capacity}
                   </p>
-                  <div className="space-y-2">
-                    <div className="flex items-baseline gap-2">
-                      <p className="text-3xl font-bold">
-                        {classroom.occupancy}
-                      </p>
-                      <p className="text-muted-foreground">
-                        / {classroom.capacity}
-                      </p>
-                    </div>
-                    <Progress value={occupancyPercent} className="h-2" />
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-muted-foreground">
-                        {occupancyPercent.toFixed(1)}% full
-                      </p>
-                      <p className={`text-sm font-semibold ${statusColor}`}>
-                        {occupancyStatus}
-                      </p>
-                    </div>
-                  </div>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Stats Card */}
-            <Card className="border-2">
-              <CardContent className="pt-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 rounded-lg bg-primary/10">
-                    <p className="text-xs text-muted-foreground mb-1">
-                      Capacity
-                    </p>
-                    <p className="text-2xl font-bold flex items-center gap-1">
-                      <Users className="h-5 w-5 text-primary" />
-                      {classroom.capacity}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                    <p className="text-xs text-muted-foreground mb-1">
-                      Currently
-                    </p>
-                    <p className="text-2xl font-bold">{classroom.occupancy}</p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-amber-100 dark:bg-amber-900/30 col-span-2">
-                    <p className="text-xs text-muted-foreground mb-1">
-                      Available Seats
-                    </p>
-                    <p className="text-2xl font-bold">
-                      {classroom.capacity - classroom.occupancy}
-                    </p>
-                  </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground">Free seats</p>
+                  <p className="font-serif text-2xl text-success">
+                    {classroom.capacity - classroom.occupancy}
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
 
-            {/* Metadata Card */}
+            {/* Device info card */}
+            <div className="border border-border rounded-lg bg-card/60 p-6 space-y-3">
+              <p className="text-xs tracking-widest uppercase text-muted-foreground">
+                Device
+              </p>
+              <div className="flex items-center gap-2 text-sm">
+                <Cpu className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <span className="font-mono break-all">{classroom.deviceId}</span>
+              </div>
+            </div>
+
+            {/* Timestamps card */}
             {(classroom.createdAt || classroom.updatedAt) && (
-              <Card className="border-2">
-                <CardContent className="pt-6 space-y-3">
-                  {classroom.createdAt && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Calendar className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">Created</p>
-                        <p className="font-mono text-xs">
-                          {new Date(classroom.createdAt).toLocaleString()}
-                        </p>
-                      </div>
+              <div className="border border-border rounded-lg bg-card/60 p-6 space-y-3">
+                <p className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Timestamps
+                </p>
+                {classroom.createdAt && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <Calendar className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Created</p>
+                      <p className="font-mono text-xs">{new Date(classroom.createdAt).toLocaleString()}</p>
                     </div>
-                  )}
-                  {classroom.updatedAt && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          Last Updated
-                        </p>
-                        <p className="font-mono text-xs">
-                          {new Date(classroom.updatedAt).toLocaleString()}
-                        </p>
-                      </div>
+                  </div>
+                )}
+                {classroom.updatedAt && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <Clock className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Last updated</p>
+                      <p className="font-mono text-xs">{new Date(classroom.updatedAt).toLocaleString()}</p>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Delete Button */}
-            {isAdmin && (
-              <Button
-                variant="destructive"
-                className="w-full"
-                onClick={handleDelete}
-                disabled={deleting}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                {deleting ? "Deleting..." : "Delete Classroom"}
-              </Button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
-      </main>
+      </div>
 
       {/* Edit Dialog */}
       <EditClassroomDialog
@@ -327,6 +303,37 @@ const ClassroomDetail = () => {
         classroom={classroom}
         onSubmit={handleEdit}
       />
+
+      {/* Delete Confirmation — uses AlertDialog, not browser confirm() */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-serif text-xl font-normal">
+              Delete classroom?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground">
+              This will permanently delete{" "}
+              <strong className="text-foreground">{classroom.className}</strong> and all
+              associated data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleting}
+              className="text-xs tracking-widest uppercase rounded-full"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground text-xs tracking-widest uppercase rounded-full hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

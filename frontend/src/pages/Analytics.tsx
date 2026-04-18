@@ -120,11 +120,9 @@ const Analytics = () => {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
-            <p className="text-muted-foreground">Loading analytics...</p>
-          </div>
+        <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+          <p className="text-sm text-muted-foreground tracking-wide">Loading analytics…</p>
         </div>
       </div>
     );
@@ -134,14 +132,16 @@ const Analytics = () => {
     <div className="min-h-screen bg-background">
       <Navigation />
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-6 pt-28 pb-16">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-1">Analytics</h1>
-          <p className="text-muted-foreground">
-            Live occupancy overview — updates automatically
+        <div className="mb-12">
+          <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-3">
+            Live Overview
           </p>
+          <h1 className="font-serif text-4xl md:text-5xl text-foreground">Analytics</h1>
         </div>
+
+        <div className="h-px bg-border mb-12" />
 
         {error && (
           <Alert variant="destructive" className="mb-6">
@@ -151,12 +151,14 @@ const Analytics = () => {
         )}
 
         {classrooms.length === 0 ? (
-          <div className="text-center py-24">
-            <Building2 className="h-14 w-14 text-muted-foreground mx-auto mb-4 opacity-40" />
-            <p className="text-xl font-semibold mb-2">No classrooms yet</p>
-            <p className="text-muted-foreground">
-              Add classrooms in the Dashboard to see analytics here.
-            </p>
+          <div className="flex flex-col items-center py-24 gap-6 text-center">
+            <Building2 className="h-10 w-10 text-muted-foreground/40" />
+            <div>
+              <p className="font-serif text-2xl text-foreground mb-2">No classrooms yet</p>
+              <p className="text-sm text-muted-foreground">
+                Add classrooms in the Dashboard to see analytics here.
+              </p>
+            </div>
           </div>
         ) : (
           <>

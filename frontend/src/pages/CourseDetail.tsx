@@ -117,9 +117,19 @@ const CourseDetail = () => {
   const [selectedClassroomId, setSelectedClassroomId] = useState("");
   const [starting, setStarting] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const [elapsed, setElapsed] = useState("");
   const [updatingStudent, setUpdatingStudent] = useState<string | null>(null);
   const [exportingSessionId, setExportingSessionId] = useState<string | null>(null);
+
+  // Per-student attendance summary across ALL ended sessions.
+  // Computed in loadData by fetching records for every ended session in parallel.
+  // Used to show threshold warning badges in the Students tab.
+  // BACKEND NOTE: If this becomes slow as session count grows, add:
+  //   GET /attendance/courses/:courseId/students/summary
+  //   Returns { studentId, presentCount, totalSessions, attendanceRate }[]
+  const [studentSummaries, setStudentSummaries] = useState<Record<string, { present: number; total: number }>>({});
 
   // Derived from the sessions list — at most one session has status "active" at a time.
   // The backend must enforce this: reject POST /attendance/sessions if an active session
@@ -156,23 +166,49 @@ const CourseDetail = () => {
     return () => clearInterval(id);
   }, [activeSession?.id]);
 
-  // Loads all page data in parallel on mount. The classrooms list is also fetched
-  // here because the lecturer needs it for the "Select Classroom" dropdown on this page.
-  // The classrooms come from the existing /classrooms endpoint — no new backend work needed.
+  // Loads all page data in parallel on mount.
+  // Also fetches attendance records for every ended session so we can compute
+  // per-student attendance rates for the threshold badge in the Students tab.
   const loadData = useCallback(async () => {
     if (!courseId) return;
     try {
       setError(null);
       const [courseData, studentsData, sessionsData, classroomsData] = await Promise.all([
-        api.attendance.courses.get(courseId),           // GET /attendance/courses/:id
-        api.attendance.students.list(courseId),          // GET /attendance/courses/:id/students
-        api.attendance.sessions.list(courseId),          // GET /attendance/courses/:id/sessions
-        api.classrooms.list(),                           // GET /classrooms (existing endpoint)
+        api.attendance.courses.get(courseId),
+        api.attendance.students.list(courseId),
+        api.attendance.sessions.list(courseId),
+        api.classrooms.list(),
       ]);
       setCourse(courseData);
       setStudents(studentsData);
       setSessions(sessionsData);
       setClassrooms(classroomsData);
+
+      // Fetch records for all ended sessions to compute per-student attendance rates.
+      // Uses existing GET /attendance/sessions/:id/attendance — no new endpoint needed.
+      // Errors per-session are swallowed so one bad session doesn't block the page.
+      const endedSessions = sessionsData.filter((s) => s.status === "ended");
+      if (endedSessions.length > 0 && studentsData.length > 0) {
+        const allRecords = await Promise.all(
+          endedSessions.map((s) =>
+            api.attendance.sessions
+              .getAttendance(s.id)
+              .catch(() => [] as typeof studentsData)
+          )
+        );
+        const summaries: Record<string, { present: number; total: number }> = {};
+        for (const student of studentsData) {
+          summaries[student.id] = { present: 0, total: endedSessions.length };
+        }
+        for (const records of allRecords) {
+          for (const record of records) {
+            if (summaries[record.studentId] && record.status === "present") {
+              summaries[record.studentId].present++;
+            }
+          }
+        }
+        setStudentSummaries(summaries);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load course");
     } finally {
@@ -283,6 +319,68 @@ const CourseDetail = () => {
       toast.error("Failed to update attendance");
     } finally {
       setUpdatingStudent(null);
+    }
+  };
+
+  // On-demand attendance capture — the primary attendance mechanism.
+  // Calls POST /attendance/sessions/:id/capture which signals the camera to
+  // take a snapshot NOW and run facial recognition against all registered students.
+  // BACKEND: see api.ts → attendance.sessions.capture() for full spec.
+  const handleCaptureAttendance = async () => {
+    if (!activeSession) return;
+    setCapturing(true);
+    try {
+      const records = await api.attendance.sessions.capture(activeSession.id);
+      setAttendanceRecords(records);
+      const present = records.filter((r) => r.status === "present").length;
+      toast.success(`Attendance captured — ${present} student${present !== 1 ? "s" : ""} detected`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Capture failed. Check camera connection.");
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  // Fallback: mark every unrecorded student as present when the camera fails.
+  // Sets manuallyOverridden: true so the camera result (if it comes later) won't
+  // overwrite these entries. The lecturer can still toggle individuals afterwards.
+  const handleMarkAllPresent = async () => {
+    if (!activeSession || students.length === 0) return;
+    setMarkingAll(true);
+    const toMark = students.filter((s) => {
+      const rec = attendanceRecords.find((r) => r.studentId === s.id);
+      return !rec || rec.status !== "present";
+    });
+    try {
+      await Promise.all(
+        toMark.map((s) =>
+          api.attendance.sessions.updateAttendance(activeSession.id, s.id, "present")
+        )
+      );
+      setAttendanceRecords((prev) => {
+        const updated = [...prev];
+        for (const student of toMark) {
+          const idx = updated.findIndex((r) => r.studentId === student.id);
+          if (idx !== -1) {
+            updated[idx] = { ...updated[idx], status: "present", manuallyOverridden: true };
+          } else {
+            updated.push({
+              id: `manual-${student.id}`,
+              sessionId: activeSession.id,
+              studentId: student.id,
+              matricNumber: student.matricNumber,
+              status: "present",
+              manuallyOverridden: true,
+            });
+          }
+        }
+        return updated;
+      });
+      toast.success(`Marked ${toMark.length} student${toMark.length !== 1 ? "s" : ""} present`);
+    } catch {
+      toast.error("Failed to mark all present");
+    } finally {
+      setMarkingAll(false);
     }
   };
 
@@ -569,34 +667,54 @@ const CourseDetail = () => {
                     </Button>
                   </div>
                 ) : (
-                  students.map((student) => (
-                    <Card key={student.id}>
-                      <CardContent className="py-3">
-                        <div className="flex items-center gap-3">
-                          {student.photoUrl ? (
-                            <img
-                              src={student.photoUrl}
-                              alt={student.matricNumber}
-                              className="h-10 w-10 rounded-full object-cover flex-shrink-0"
-                            />
-                          ) : (
-                            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                              <Users className="h-5 w-5 text-muted-foreground" />
+                  students.map((student) => {
+                    const summary = studentSummaries[student.id];
+                    // Attendance threshold badge — warns when a student is at risk.
+                    // 75% is the standard university attendance requirement.
+                    // Only shown once there is at least one ended session to measure against.
+                    const rate = summary && summary.total > 0
+                      ? Math.round((summary.present / summary.total) * 100)
+                      : null;
+                    const thresholdBadge =
+                      rate === null ? null :
+                      rate >= 75 ? { label: `${rate}%`, cls: "text-success" } :
+                      rate >= 50 ? { label: `${rate}% ⚠`, cls: "text-warning" } :
+                                   { label: `${rate}% ✕`, cls: "text-destructive" };
+
+                    return (
+                      <Card key={student.id}>
+                        <CardContent className="py-3">
+                          <div className="flex items-center gap-3">
+                            {student.photoUrl ? (
+                              <img
+                                src={student.photoUrl}
+                                alt={student.matricNumber}
+                                className="h-10 w-10 rounded-full object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                <Users className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium font-mono text-sm">
+                                {student.matricNumber}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Registered{" "}
+                                {format(new Date(student.registeredAt), "MMM d, yyyy")}
+                              </p>
                             </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium font-mono text-sm">
-                              {student.matricNumber}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Registered{" "}
-                              {format(new Date(student.registeredAt), "MMM d, yyyy")}
-                            </p>
+                            {thresholdBadge && (
+                              <span className={`text-xs font-mono font-medium flex-shrink-0 ${thresholdBadge.cls}`}>
+                                {thresholdBadge.label}
+                              </span>
+                            )}
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
+                        </CardContent>
+                      </Card>
+                    );
+                  })
                 )}
               </TabsContent>
             </Tabs>
@@ -679,7 +797,7 @@ const CourseDetail = () => {
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground text-xs">
-                      Tap "Take Attendance" when ready
+                      Click "Take Attendance" when ready
                     </span>
                     <Badge variant="outline" className="text-xs">
                       {presentCount} / {students.length}
@@ -688,8 +806,47 @@ const CourseDetail = () => {
 
                   <Separator />
 
-                  {/* Export the live attendance list mid-session or snapshot for records */}
-                  {activeSession && students.length > 0 && (
+                  {/* Primary: on-demand capture trigger.
+                      BACKEND: POST /attendance/sessions/:id/capture
+                      Signals the camera to snapshot now, runs recognition, returns records. */}
+                  <Button
+                    className="w-full"
+                    onClick={handleCaptureAttendance}
+                    disabled={capturing || students.length === 0}
+                  >
+                    {capturing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Capturing…
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="h-4 w-4 mr-2" />
+                        Take Attendance
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Fallback: mark everyone present when the camera is unavailable */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs"
+                    onClick={handleMarkAllPresent}
+                    disabled={markingAll || students.length === 0}
+                  >
+                    {markingAll ? (
+                      <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Marking…</>
+                    ) : (
+                      <>
+                        <UserCheck className="h-3.5 w-3.5 mr-2" />
+                        Mark All Present (camera fallback)
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Export live attendance snapshot */}
+                  {students.length > 0 && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="outline" size="sm" className="w-full text-xs">
@@ -699,24 +856,16 @@ const CourseDetail = () => {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                          onClick={() => handleExportSession(activeSession, "csv")}
-                        >
+                        <DropdownMenuItem onClick={() => handleExportSession(activeSession, "csv")}>
                           Export as CSV
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleExportSession(activeSession, "json")}
-                        >
+                        <DropdownMenuItem onClick={() => handleExportSession(activeSession, "json")}>
                           Export as JSON
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleExportSession(activeSession, "docx")}
-                        >
+                        <DropdownMenuItem onClick={() => handleExportSession(activeSession, "docx")}>
                           Export as Word (.docx)
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleExportSession(activeSession, "pdf")}
-                        >
+                        <DropdownMenuItem onClick={() => handleExportSession(activeSession, "pdf")}>
                           Export as PDF
                         </DropdownMenuItem>
                       </DropdownMenuContent>
