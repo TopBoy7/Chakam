@@ -182,7 +182,7 @@ const StudentRegistration = () => {
         {/* Branding + Course Info */}
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center gap-2 mb-5">
-            <img src="/cam.png" alt="Chakam" className="h-8 w-8" />
+            <img src="/cam.png" alt="Chakam" className="h-8 w-8 img-foreground" />
             <span className="text-xl font-bold">Chakam</span>
           </div>
           <Badge variant="secondary" className="font-mono text-sm px-3 py-1">

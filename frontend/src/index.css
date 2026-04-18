@@ -137,6 +137,11 @@
   .reveal-delay-3 { transition-delay: 0.3s; }
   .reveal-delay-4 { transition-delay: 0.4s; }
 
+  /* Forces any image to the site's dark warm-brown foreground colour */
+  .img-foreground {
+    filter: brightness(0) saturate(1) sepia(1) hue-rotate(340deg) saturate(0.45) brightness(0.18);
+  }
+
   /* Subtle shimmer line used as a decorative divider */
   .rule-gold {
     height: 1px;

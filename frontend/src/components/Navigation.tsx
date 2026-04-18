@@ -63,7 +63,7 @@ const Navigation = () => {
             to="/"
             className="flex items-center gap-2.5 absolute left-1/2 -translate-x-1/2"
           >
-            <img src="/cam.png" alt="Chakam" className="h-6 w-6" />
+            <img src="/cam.png" alt="Chakam" className="h-6 w-6 img-foreground" />
             <span className="font-serif text-xl tracking-wide text-foreground">
               Chakam
             </span>

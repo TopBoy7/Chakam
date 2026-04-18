@@ -285,7 +285,7 @@ const Home = () => {
       <footer ref={footerRef} className="reveal border-t border-border py-12 px-6">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
           <div className="flex items-center gap-2.5">
-            <img src="/cam.png" alt="Chakam" className="h-6 w-6" />
+            <img src="/cam.png" alt="Chakam" className="h-6 w-6 img-foreground" />
             <span className="font-serif text-lg text-foreground">Chakam</span>
           </div>
 
