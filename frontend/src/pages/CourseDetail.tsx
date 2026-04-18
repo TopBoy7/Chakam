@@ -1,0 +1,611 @@
+import { useEffect, useState, useCallback } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { format } from "date-fns";
+import Navigation from "@/components/Navigation";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ChevronLeft,
+  AlertCircle,
+  Users,
+  Clock,
+  Play,
+  Square,
+  CheckCircle2,
+  XCircle,
+  Camera,
+  UserCheck,
+  CalendarDays,
+  Copy,
+  MapPin,
+  Cpu,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
+import type { Course, RegisteredStudent, Session, AttendanceRecord } from "@/types/attendance";
+import type { Classroom } from "@/types/classroom";
+
+function formatElapsed(startedAt: string): string {
+  const totalSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+  );
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+  }
+  return `${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`;
+}
+
+const CourseDetail = () => {
+  const { courseId } = useParams<{ courseId: string }>();
+  const navigate = useNavigate();
+  const { isAdmin } = useAuth();
+
+  const [course, setCourse] = useState<Course | null>(null);
+  const [students, setStudents] = useState<RegisteredStudent[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedClassroomId, setSelectedClassroomId] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [elapsed, setElapsed] = useState("");
+  const [updatingStudent, setUpdatingStudent] = useState<string | null>(null);
+
+  const activeSession = sessions.find((s) => s.status === "active") ?? null;
+
+  // Live session timer
+  useEffect(() => {
+    if (!activeSession) return;
+    const tick = () => setElapsed(formatElapsed(activeSession.startedAt));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [activeSession?.startedAt]);
+
+  // Poll attendance records every 30s during active session
+  useEffect(() => {
+    if (!activeSession) return;
+    const fetchAttendance = async () => {
+      try {
+        const records = await api.attendance.sessions.getAttendance(activeSession.id);
+        setAttendanceRecords(records);
+      } catch {
+        // silently ignore polling errors
+      }
+    };
+    fetchAttendance();
+    const id = setInterval(fetchAttendance, 30000);
+    return () => clearInterval(id);
+  }, [activeSession?.id]);
+
+  const loadData = useCallback(async () => {
+    if (!courseId) return;
+    try {
+      setError(null);
+      const [courseData, studentsData, sessionsData, classroomsData] = await Promise.all([
+        api.attendance.courses.get(courseId),
+        api.attendance.students.list(courseId),
+        api.attendance.sessions.list(courseId),
+        api.classrooms.list(),
+      ]);
+      setCourse(courseData);
+      setStudents(studentsData);
+      setSessions(sessionsData);
+      setClassrooms(classroomsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load course");
+    } finally {
+      setLoading(false);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleStartClass = async () => {
+    if (!courseId || !selectedClassroomId) return;
+    setStarting(true);
+    try {
+      const session = await api.attendance.sessions.start(courseId, selectedClassroomId);
+      const classroom = classrooms.find((c) => c.id === selectedClassroomId);
+      setSessions((prev) => [
+        { ...session, classroomName: classroom?.className ?? session.classroomName },
+        ...prev,
+      ]);
+      setAttendanceRecords([]);
+      toast.success(`Class started — ${classroom?.className ?? "camera"} will track attendance`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start class");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleEndClass = async () => {
+    if (!activeSession) return;
+    setEnding(true);
+    try {
+      await api.attendance.sessions.end(activeSession.id);
+      const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === activeSession.id
+            ? {
+                ...s,
+                status: "ended" as const,
+                endedAt: new Date().toISOString(),
+                presentCount,
+              }
+            : s
+        )
+      );
+      setAttendanceRecords([]);
+      toast.success("Class ended — attendance has been saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to end class");
+    } finally {
+      setEnding(false);
+    }
+  };
+
+  const handleToggleStudentPresence = async (student: RegisteredStudent) => {
+    if (!activeSession) return;
+    const record = attendanceRecords.find((r) => r.studentId === student.id);
+    const currentStatus = record?.status ?? "absent";
+    const newStatus: "present" | "absent" = currentStatus === "present" ? "absent" : "present";
+    setUpdatingStudent(student.id);
+    try {
+      await api.attendance.sessions.updateAttendance(activeSession.id, student.id, newStatus);
+      setAttendanceRecords((prev) => {
+        const existing = prev.find((r) => r.studentId === student.id);
+        if (existing) {
+          return prev.map((r) =>
+            r.studentId === student.id
+              ? { ...r, status: newStatus, manuallyOverridden: true }
+              : r
+          );
+        }
+        return [
+          ...prev,
+          {
+            id: `manual-${student.id}`,
+            sessionId: activeSession.id,
+            studentId: student.id,
+            matricNumber: student.matricNumber,
+            status: newStatus,
+            manuallyOverridden: true,
+          },
+        ];
+      });
+    } catch {
+      toast.error("Failed to update attendance");
+    } finally {
+      setUpdatingStudent(null);
+    }
+  };
+
+  const copyRegistrationLink = () => {
+    if (!course) return;
+    const link = `${window.location.origin}/register/${course.registrationToken}`;
+    navigator.clipboard.writeText(link).then(() => {
+      toast.success("Registration link copied to clipboard");
+    });
+  };
+
+  const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
+  const endedSessions = sessions.filter((s) => s.status === "ended");
+  const activeClassroom = classrooms.find((c) => c.id === activeSession?.classroomId) ?? null;
+
+  // ── Loading ──────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="text-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+          <p className="mt-4 text-muted-foreground">Loading course...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error ────────────────────────────────────────────────────────────────────
+  if (error || !course) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 py-8 max-w-lg">
+          <Alert variant="destructive" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error || "Course not found"}</AlertDescription>
+          </Alert>
+          <Button variant="ghost" onClick={() => navigate("/attendance")}>
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Back to Attendance
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main page ────────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-background">
+      <Navigation />
+
+      <div className="container mx-auto px-4 py-8">
+        {/* Breadcrumb */}
+        <Link
+          to="/attendance"
+          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
+        >
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          All Courses
+        </Link>
+
+        {/* Course Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
+          <Badge variant="secondary" className="text-base font-mono tracking-wide w-fit px-3 py-1">
+            {course.courseCode}
+          </Badge>
+          <h1 className="text-2xl sm:text-3xl font-bold">{course.courseName}</h1>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-8">
+          <span className="flex items-center gap-1.5">
+            <Users className="h-4 w-4" />
+            {students.length} {students.length === 1 ? "student" : "students"}
+          </span>
+          <button
+            onClick={copyRegistrationLink}
+            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+          >
+            <Copy className="h-4 w-4" />
+            Copy registration link
+          </button>
+        </div>
+
+        {/* Active Session Banner */}
+        {activeSession && (
+          <div className="mb-6 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+              </span>
+              <span className="font-medium text-green-700 dark:text-green-400">
+                Class in session
+              </span>
+              <span className="text-muted-foreground text-sm font-mono tabular-nums">
+                {elapsed}
+              </span>
+              {activeClassroom && (
+                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5" />
+                  {activeClassroom.className}
+                </span>
+              )}
+            </div>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleEndClass}
+              disabled={ending}
+            >
+              <Square className="h-3.5 w-3.5 mr-2" />
+              {ending ? "Ending..." : "End Class"}
+            </Button>
+          </div>
+        )}
+
+        {/* Main Two-Column Layout */}
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* ── Left: Tabs ──────────────────────────────────────────────────── */}
+          <div className="lg:col-span-2">
+            <Tabs defaultValue="sessions">
+              <TabsList className="mb-5 w-full sm:w-auto">
+                <TabsTrigger value="sessions" className="flex-1 sm:flex-none">
+                  <CalendarDays className="h-4 w-4 mr-2" />
+                  Sessions
+                </TabsTrigger>
+                <TabsTrigger value="students" className="flex-1 sm:flex-none">
+                  <Users className="h-4 w-4 mr-2" />
+                  Students ({students.length})
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Sessions Tab */}
+              <TabsContent value="sessions" className="space-y-3 focus-visible:outline-none">
+                {endedSessions.length === 0 ? (
+                  <div className="text-center py-16 text-muted-foreground">
+                    <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                    <p className="font-medium">No sessions recorded yet</p>
+                    <p className="text-sm mt-1">
+                      Start a class to begin tracking attendance.
+                    </p>
+                  </div>
+                ) : (
+                  endedSessions.map((session) => {
+                    const duration =
+                      session.endedAt
+                        ? Math.round(
+                            (new Date(session.endedAt).getTime() -
+                              new Date(session.startedAt).getTime()) /
+                              60000
+                          )
+                        : null;
+
+                    return (
+                      <Card key={session.id}>
+                        <CardContent className="py-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 font-medium text-sm">
+                                <Clock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                {format(new Date(session.startedAt), "MMMM d, yyyy")}
+                                <span className="text-muted-foreground font-normal">
+                                  {format(new Date(session.startedAt), "h:mm a")}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs text-muted-foreground ml-6">
+                                {session.classroomName && (
+                                  <span>{session.classroomName}</span>
+                                )}
+                                {duration !== null && (
+                                  <span>{duration} min</span>
+                                )}
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                session.presentCount > 0 ? "default" : "secondary"
+                              }
+                              className="w-fit"
+                            >
+                              <UserCheck className="h-3 w-3 mr-1" />
+                              {session.presentCount} / {session.totalStudents} present
+                            </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                )}
+              </TabsContent>
+
+              {/* Students Tab */}
+              <TabsContent value="students" className="space-y-2 focus-visible:outline-none">
+                {students.length === 0 ? (
+                  <div className="text-center py-16 text-muted-foreground">
+                    <Users className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                    <p className="font-medium">No students registered</p>
+                    <p className="text-sm mt-1 max-w-xs mx-auto">
+                      Share the registration link with your students so they can sign up.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={copyRegistrationLink}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy Registration Link
+                    </Button>
+                  </div>
+                ) : (
+                  students.map((student) => (
+                    <Card key={student.id}>
+                      <CardContent className="py-3">
+                        <div className="flex items-center gap-3">
+                          {student.photoUrl ? (
+                            <img
+                              src={student.photoUrl}
+                              alt={student.matricNumber}
+                              className="h-10 w-10 rounded-full object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                              <Users className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium font-mono text-sm">
+                              {student.matricNumber}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Registered{" "}
+                              {format(new Date(student.registeredAt), "MMM d, yyyy")}
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* ── Right: Session Control ───────────────────────────────────────── */}
+          <div>
+            {!activeSession ? (
+              /* Start Class Card — classroom selector is inline so it's always visible */
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Start a Class</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="classroom-select">Classroom</Label>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Select the room you're teaching in — this tells the system which
+                      camera to activate for attendance tracking.
+                    </p>
+                    {classrooms.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-1">
+                        No classrooms available. Add one in the Dashboard first.
+                      </p>
+                    ) : (
+                      <Select
+                        value={selectedClassroomId}
+                        onValueChange={setSelectedClassroomId}
+                      >
+                        <SelectTrigger id="classroom-select">
+                          <SelectValue placeholder="Select classroom..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {classrooms.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              <span className="font-medium">{c.className}</span>
+                              <span className="text-muted-foreground ml-1">
+                                ({c.classId})
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={handleStartClass}
+                    disabled={!isAdmin || starting || !selectedClassroomId}
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    {starting ? "Starting..." : "Start Class"}
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              /* Live Attendance Card */
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Camera className="h-4 w-4 text-primary" />
+                    Live Attendance
+                  </CardTitle>
+                  {activeClassroom && (
+                    <div className="mt-1 space-y-0.5">
+                      <p className="text-sm font-medium flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                        {activeClassroom.className}
+                        <span className="text-muted-foreground font-normal">
+                          ({activeClassroom.classId})
+                        </span>
+                      </p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Cpu className="h-3 w-3" />
+                        Camera: {activeClassroom.deviceId}
+                      </p>
+                    </div>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground text-xs">
+                      Snapshots every 5 min · auto-refreshing
+                    </span>
+                    <Badge variant="outline" className="text-xs">
+                      {presentCount} / {students.length}
+                    </Badge>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-1 max-h-[420px] overflow-y-auto -mx-1 px-1">
+                    {students.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-6">
+                        No students registered.
+                      </p>
+                    ) : (
+                      students.map((student) => {
+                        const record = attendanceRecords.find(
+                          (r) => r.studentId === student.id
+                        );
+                        const isPresent = record?.status === "present";
+                        const isManual = record?.manuallyOverridden;
+                        const isUpdating = updatingStudent === student.id;
+
+                        return (
+                          <div
+                            key={student.id}
+                            className="flex items-center gap-2.5 py-2 rounded-md px-1 hover:bg-muted/50 transition-colors"
+                          >
+                            {student.photoUrl ? (
+                              <img
+                                src={student.photoUrl}
+                                alt=""
+                                className="h-7 w-7 rounded-full object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                                <Users className="h-3.5 w-3.5 text-muted-foreground" />
+                              </div>
+                            )}
+
+                            <span className="flex-1 text-sm font-mono truncate min-w-0">
+                              {student.matricNumber}
+                            </span>
+
+                            {isManual && (
+                              <span className="text-xs text-muted-foreground hidden sm:inline">
+                                manual
+                              </span>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentPresence(student)}
+                              disabled={isUpdating}
+                              className="flex-shrink-0 transition-opacity disabled:opacity-50"
+                              aria-label={
+                                isPresent
+                                  ? `Mark ${student.matricNumber} absent`
+                                  : `Mark ${student.matricNumber} present`
+                              }
+                            >
+                              {isUpdating ? (
+                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                              ) : isPresent ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              ) : (
+                                <XCircle className="h-5 w-5 text-muted-foreground/60 hover:text-muted-foreground" />
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
+export default CourseDetail;

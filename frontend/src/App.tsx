@@ -8,6 +8,9 @@ import Home from "./pages/Home";
 import Dashboard from "./pages/Dashboard";
 import Analytics from "./pages/Analytics";
 import ClassroomDetail from "./pages/ClassroomDetail";
+import Attendance from "./pages/Attendance";
+import CourseDetail from "./pages/CourseDetail";
+import StudentRegistration from "./pages/StudentRegistration";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +27,9 @@ const App = () => (
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/classroom/:classId" element={<ClassroomDetail />} />
+            <Route path="/attendance" element={<Attendance />} />
+            <Route path="/attendance/course/:courseId" element={<CourseDetail />} />
+            <Route path="/register/:token" element={<StudentRegistration />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Activity, BarChart3, Home, Menu, X } from "lucide-react";
+import { Activity, BarChart3, Home, Menu, X, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -11,7 +11,12 @@ const Navigation = () => {
     { to: "/", label: "Home", icon: Home },
     { to: "/dashboard", label: "Dashboard", icon: Activity },
     { to: "/analytics", label: "Analytics", icon: BarChart3 },
+    { to: "/attendance", label: "Attendance", icon: ClipboardList },
   ];
+
+  const isAttendanceActive =
+    location.pathname === "/attendance" ||
+    location.pathname.startsWith("/attendance/");
 
   return (
     <nav className="border-b border-border bg-card">
@@ -26,7 +31,10 @@ const Navigation = () => {
           <div className="hidden md:flex gap-1">
             {links.map((link) => {
               const Icon = link.icon;
-              const isActive = location.pathname === link.to;
+              const isActive =
+                link.to === "/attendance"
+                  ? isAttendanceActive
+                  : location.pathname === link.to;
               return (
                 <Link
                   key={link.to}
@@ -47,6 +55,7 @@ const Navigation = () => {
 
           {/* Mobile Menu Button */}
           <button
+            type="button"
             className="md:hidden"
             onClick={() => setIsOpen(!isOpen)}
             aria-label="Toggle menu"
@@ -60,7 +69,10 @@ const Navigation = () => {
           <div className="md:hidden pb-4 flex flex-col gap-2">
             {links.map((link) => {
               const Icon = link.icon;
-              const isActive = location.pathname === link.to;
+              const isActive =
+                link.to === "/attendance"
+                  ? isAttendanceActive
+                  : location.pathname === link.to;
               return (
                 <Link
                   key={link.to}
