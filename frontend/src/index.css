@@ -137,9 +137,10 @@
   .reveal-delay-3 { transition-delay: 0.3s; }
   .reveal-delay-4 { transition-delay: 0.4s; }
 
-  /* Forces any image to the site's dark warm-brown foreground colour */
+  /* Forces any image to the site's dark warm-brown foreground colour hsl(25 22% 11%).
+     Chain: strip colour → grayscale → sepia tint → hue-shift to 25° → desaturate → darken */
   .img-foreground {
-    filter: brightness(0) saturate(1) sepia(1) hue-rotate(340deg) saturate(0.45) brightness(0.18);
+    filter: grayscale(1) sepia(1) hue-rotate(349deg) saturate(0.6) brightness(0.16);
   }
 
   /* Subtle shimmer line used as a decorative divider */

@@ -679,7 +679,7 @@ const CourseDetail = () => {
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground text-xs">
-                      Snapshots every 5 min · auto-refreshing
+                      Tap "Take Attendance" when ready
                     </span>
                     <Badge variant="outline" className="text-xs">
                       {presentCount} / {students.length}

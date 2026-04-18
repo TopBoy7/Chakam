@@ -34,8 +34,8 @@ function useReveal() {
 const features = [
   {
     label: "01",
-    title: "Real-Time Monitoring",
-    body: "Live classroom status delivered via IoT sensors and WebSocket streams — know occupancy the instant it changes.",
+    title: "Live Occupancy",
+    body: "Classroom status updates the instant it changes — IoT sensors push data over WebSocket so the dashboard is always current.",
     to: "/dashboard",
     cta: "Open Dashboard",
     Icon: Activity,
@@ -43,7 +43,7 @@ const features = [
   {
     label: "02",
     title: "Usage Analytics",
-    body: "Fill rates, peak hours, and comparative occupancy across every room — all derived from real sensor data.",
+    body: "Fill rates, peak hours, and comparative occupancy across every room — all derived from real sensor data, zero guesswork.",
     to: "/analytics",
     cta: "View Analytics",
     Icon: BarChart3,
@@ -51,7 +51,7 @@ const features = [
   {
     label: "03",
     title: "Attendance Tracking",
-    body: "Facial recognition marks students present automatically. Lecturers can override, export CSV, DOCX, or PDF.",
+    body: "When the lecturer is ready, one button triggers an instant snapshot. Every face in the room is matched and marked present in one shot. Export in CSV, DOCX, or PDF.",
     to: "/attendance",
     cta: "Manage Courses",
     Icon: ClipboardList,
@@ -61,7 +61,7 @@ const features = [
 /* ── Stat items ─────────────────────────────────────────────────────────── */
 const stats = [
   { value: "< 5 s", label: "Occupancy update latency" },
-  { value: "5 min", label: "Attendance snapshot interval" },
+  { value: "1 tap", label: "To capture full attendance" },
   { value: "4", label: "Export formats supported" },
   { value: "∞", label: "Classrooms monitored" },
 ];
@@ -111,9 +111,8 @@ const Home = () => {
           </h1>
 
           <p className="text-muted-foreground text-lg leading-relaxed max-w-xl mx-auto font-light">
-            Real-time occupancy monitoring and automated attendance tracking
-            for every classroom on campus — powered by IoT cameras and
-            facial recognition.
+            Occupancy monitoring and instant attendance capture for every
+            classroom on campus — powered by IoT cameras and facial recognition.
           </p>
 
           <div className="rule-gold w-24 mx-auto" />
@@ -250,9 +249,9 @@ const Home = () => {
 
           <div className="grid md:grid-cols-3 gap-0 border border-border rounded-lg overflow-hidden">
             {[
-              { step: "01", title: "Camera sees", desc: "An ESP32-CAM mounted in the classroom captures periodic snapshots every 5 minutes during active sessions." },
-              { step: "02", title: "AI recognises", desc: "Facial recognition compares faces against registered student photos and marks each one present automatically." },
-              { step: "03", title: "Lecturer reviews", desc: "The web dashboard shows live attendance, allows manual overrides, and exports clean reports in any format." },
+              { step: "01", title: "Students register", desc: "Each student scans a link shared by their lecturer, enters their matric number, and uploads a passport photo — once, before the semester begins." },
+              { step: "02", title: "Lecturer captures", desc: "At the moment the lecturer decides attendance is closed, they tap one button. The camera captures a single snapshot of the entire room." },
+              { step: "03", title: "Instant results", desc: "Every face is matched against registered photos in seconds. The dashboard shows who is present, allows manual overrides, and exports clean reports." },
             ].map((item, i) => (
               <div key={item.step} className={`p-8 md:p-10 ${i < 2 ? "border-b md:border-b-0 md:border-r border-border" : ""}`}>
                 <p className="text-xs tracking-[0.2em] text-muted-foreground/60 font-mono mb-6">{item.step}</p>
@@ -268,8 +267,8 @@ const Home = () => {
       <section className="py-24 px-6 border-t border-border">
         <div className="max-w-2xl mx-auto text-center space-y-8">
           <h2 className="font-serif text-4xl md:text-6xl text-foreground leading-tight">
-            Ready to monitor<br />
-            <em className="not-italic text-muted-foreground">every room?</em>
+            One tap.<br />
+            <em className="not-italic text-muted-foreground">Every student accounted for.</em>
           </h2>
           <Link
             to="/dashboard"
