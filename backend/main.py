@@ -12,6 +12,7 @@ from io import BytesIO
 import cv2
 import numpy as np
 import logging
+import time
 
 import database, models, schemas, env
 
@@ -221,6 +222,8 @@ async def delete_classroom(classId: str):
 # -------------------------------------------------------
 @app.post("/classrooms/{classId}/image", response_model=schemas.ResponseModel)
 async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile = File(...)):
+    t_total_start = time.perf_counter()
+
     classroom = await database.get_classroom_by_classId(classId)
     if not classroom:
         raise HTTPException(404, "classroom not found")
@@ -231,10 +234,12 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
     contents = await file.read()
 
     # Decode image
+    t_decode_start = time.perf_counter()
     img_array = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(400, "invalid image")
+    decode_ms = (time.perf_counter() - t_decode_start) * 1000
 
     import asyncio
     loop = asyncio.get_running_loop()
@@ -246,10 +251,12 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
         app.state.yolo_model = model
 
     # Run YOLO in executor to avoid blocking
+    t_infer_start = time.perf_counter()
     results = await loop.run_in_executor(
         None,
         lambda: model.predict(img, imgsz=1920, conf=0.25, iou=0.45, augment=True)
     )
+    inference_ms = (time.perf_counter() - t_infer_start) * 1000
 
     boxes = results[0].boxes if len(results) else []
     person_count = sum(1 for b in boxes if int(b.cls[0]) == 0)
@@ -269,8 +276,10 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
     annotated_bytes = encoded.tobytes()
 
     # Upload annotated image to Cloudinary
+    t_cloudinary_start = time.perf_counter()
     upload_result = cloudinary.uploader.upload(annotated_bytes, folder="smart_classrooms")
     new_url = upload_result["secure_url"]
+    cloudinary_ms = (time.perf_counter() - t_cloudinary_start) * 1000
 
     # Delete old image if exists
     if classroom.latestImage:
@@ -281,8 +290,10 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
             pass
 
     # Update DB
+    t_db_start = time.perf_counter()
     await database.update_classroom_by_classId(classId, {"occupancy": new_occupancy, "latestImage": new_url})
     updated = await database.get_classroom_by_classId(classId)
+    db_ms = (time.perf_counter() - t_db_start) * 1000
 
     # prepare payload: ensure _id is a string and datetimes are serializable
     updated_dict = updated.model_dump()
@@ -302,14 +313,27 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
     logger.info("Broadcast payload prepared for classroom_image_update: %s", updated_dict)
 
     # Broadcast via WebSocket.
+    t_ws_start = time.perf_counter()
     await manager.broadcast(serialize({
         "event": "classroom_image_update",
         "classroom": updated_dict
     }))
+    ws_ms = (time.perf_counter() - t_ws_start) * 1000
+
+    total_ms = (time.perf_counter() - t_total_start) * 1000
+
+    metrics = {
+        "decode_ms": round(decode_ms, 2),
+        "inference_ms": round(inference_ms, 2),
+        "cloudinary_ms": round(cloudinary_ms, 2),
+        "db_ms": round(db_ms, 2),
+        "ws_broadcast_ms": round(ws_ms, 2),
+        "total_ms": round(total_ms, 2),
+    }
 
     # Return updated classroom JSON only
     return schemas.ResponseModel(
         success=True,
         message="classroom image updated",
-        data={"classroom": updated.model_dump()}
+        data={"classroom": updated.model_dump(), "metrics": metrics}
     ).model_dump()
