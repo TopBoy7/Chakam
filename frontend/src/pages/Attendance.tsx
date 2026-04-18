@@ -30,7 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Users, Copy, ArrowRight, AlertCircle, BookOpen, Trash2 } from "lucide-react";
+import { Plus, Users, Copy, ArrowRight, AlertCircle, BookOpen, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
@@ -43,6 +43,7 @@ const Attendance = () => {
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [courseCode, setCourseCode] = useState("");
@@ -106,6 +107,11 @@ const Attendance = () => {
     navigator.clipboard.writeText(link).then(() => toast.success("Registration link copied"));
   };
 
+  const filtered = courses.filter((c) => {
+    const q = query.toLowerCase();
+    return !q || c.courseCode.toLowerCase().includes(q) || c.courseName.toLowerCase().includes(q);
+  });
+
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-background">
@@ -144,7 +150,19 @@ const Attendance = () => {
           </button>
         </div>
 
-        <div className="h-px bg-border mb-12" />
+        <div className="h-px bg-border mb-8" />
+
+        {/* Search */}
+        <div className="relative mb-10">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search courses…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full sm:max-w-sm bg-background border border-border rounded-full pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-foreground/40 transition-colors"
+          />
+        </div>
 
         {error && (
           <Alert variant="destructive" className="mb-8">
@@ -176,9 +194,14 @@ const Attendance = () => {
               Create Course
             </button>
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center py-24 gap-3 text-center">
+            <Search className="h-8 w-8 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No courses match "{query}"</p>
+          </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {courses.map((course) => (
+            {filtered.map((course) => (
               <div
                 key={course.id}
                 className="group border border-border rounded-lg bg-card/60 p-6 flex flex-col gap-5 hover:border-foreground/25 transition-colors duration-200"

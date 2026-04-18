@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import Navigation from "@/components/Navigation";
 import ClassroomCard from "@/components/ClassroomCard";
 import CreateClassroomDialog from "@/components/CreateClassroomDialog";
-import { Plus, AlertCircle, LayoutGrid } from "lucide-react";
+import { Plus, AlertCircle, LayoutGrid, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Classroom, WebSocketMessage } from "@/types/classroom";
@@ -15,6 +15,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     const fetchClassrooms = async () => {
@@ -58,6 +59,11 @@ const Dashboard = () => {
     }
   };
 
+  const filtered = classrooms.filter((c) => {
+    const q = query.toLowerCase();
+    return !q || c.className.toLowerCase().includes(q) || c.classId.toLowerCase().includes(q);
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -81,7 +87,19 @@ const Dashboard = () => {
           )}
         </div>
 
-        <div className="h-px bg-border mb-12" />
+        <div className="h-px bg-border mb-8" />
+
+        {/* Search */}
+        <div className="relative mb-10">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search classrooms…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full sm:max-w-sm bg-background border border-border rounded-full pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-foreground/40 transition-colors"
+          />
+        </div>
 
         {error && (
           <Alert variant="destructive" className="mb-8">
@@ -113,9 +131,14 @@ const Dashboard = () => {
               </button>
             )}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center py-24 gap-3 text-center">
+            <Search className="h-8 w-8 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No classrooms match "{query}"</p>
+          </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {classrooms.map((classroom) => (
+            {filtered.map((classroom) => (
               <ClassroomCard key={classroom.id} classroom={classroom} />
             ))}
           </div>

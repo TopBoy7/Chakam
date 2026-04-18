@@ -50,12 +50,6 @@ import type { StudentAttendanceSummary } from "@/types/attendance";
 
 const THRESHOLD = 0.75;
 
-function rateColor(rate: number): string {
-  if (rate >= THRESHOLD)  return "text-success";
-  if (rate >= 0.5)        return "text-warning";
-  return "text-destructive";
-}
-
 function rateBadgeVariant(rate: number): "default" | "secondary" | "destructive" | "outline" {
   if (rate >= THRESHOLD) return "secondary";
   if (rate >= 0.5)       return "outline";
@@ -78,6 +72,7 @@ const StudentPortal = () => {
   const [error, setError]         = useState<string | null>(null);
   const [results, setResults]     = useState<StudentAttendanceSummary[] | null>(null);
   const [expanded, setExpanded]   = useState<Record<string, boolean>>({});
+  const [courseQuery, setCourseQuery] = useState("");
 
   const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +81,7 @@ const StudentPortal = () => {
     setError(null);
     setResults(null);
     setExpanded({});
+    setCourseQuery("");
     try {
       const data = await api.attendance.portal.lookup(matric);
       setResults(data);
@@ -151,19 +147,43 @@ const StudentPortal = () => {
         </form>
 
         {/* Results */}
+        {/* Course filter — only visible after results load */}
+        {results && results.length > 0 && (
+          <div className="relative mb-6">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Filter by course…"
+              value={courseQuery}
+              onChange={(e) => setCourseQuery(e.target.value)}
+              className="w-full bg-background border border-border rounded-full pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-foreground/40 transition-colors"
+            />
+          </div>
+        )}
+
         {results && results.length === 0 && (
           <div className="text-center py-16">
             <p className="text-muted-foreground text-sm">No course records found for this matric number.</p>
           </div>
         )}
 
-        {results && results.length > 0 && (
+        {results && results.length > 0 && (() => {
+          const visible = results.filter((c) => {
+            const q = courseQuery.toLowerCase();
+            return !q || c.courseCode.toLowerCase().includes(q) || c.courseName.toLowerCase().includes(q);
+          });
+          return (
           <div className="space-y-4">
             <p className="text-xs tracking-widest uppercase text-muted-foreground">
-              {results.length} {results.length === 1 ? "course" : "courses"} found
+              {visible.length} {visible.length === 1 ? "course" : "courses"} found
             </p>
 
-            {results.map((course) => {
+            {visible.length === 0 ? (
+              <div className="flex flex-col items-center py-12 gap-3 text-center">
+                <Search className="h-7 w-7 text-muted-foreground/30" />
+                <p className="text-sm text-muted-foreground">No courses match "{courseQuery}"</p>
+              </div>
+            ) : visible.map((course) => {
               const pct = Math.round(course.attendanceRate * 100);
               const isOpen = !!expanded[course.courseId];
 
@@ -191,20 +211,7 @@ const StudentPortal = () => {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0 pt-1">
-                      {/* Mini progress bar */}
-                      <div className="hidden sm:block w-24 h-1.5 bg-border rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            course.attendanceRate >= THRESHOLD
-                              ? "bg-success"
-                              : course.attendanceRate >= 0.5
-                              ? "bg-warning"
-                              : "bg-destructive"
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
+                    <div className="flex items-center shrink-0 pt-1">
                       {isOpen
                         ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
                         : <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -252,7 +259,8 @@ const StudentPortal = () => {
               The university requires a minimum of 75% attendance per course.
             </p>
           </div>
-        )}
+          );
+        })()}
       </main>
     </div>
   );
