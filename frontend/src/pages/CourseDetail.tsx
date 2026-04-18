@@ -328,9 +328,9 @@ const CourseDetail = () => {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
-        <div className="text-center py-16">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
-          <p className="mt-4 text-muted-foreground">Loading course...</p>
+        <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+          <p className="text-sm text-muted-foreground tracking-wide">Loading course…</p>
         </div>
       </div>
     );
@@ -341,15 +341,19 @@ const CourseDetail = () => {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
-        <div className="container mx-auto px-4 py-8 max-w-lg">
+        <div className="max-w-lg mx-auto px-6 pt-28">
           <Alert variant="destructive" className="mb-4">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error || "Course not found"}</AlertDescription>
           </Alert>
-          <Button variant="ghost" onClick={() => navigate("/attendance")}>
-            <ChevronLeft className="h-4 w-4 mr-1" />
+          <button
+            type="button"
+            onClick={() => navigate("/attendance")}
+            className="inline-flex items-center gap-1 text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
             Back to Attendance
-          </Button>
+          </button>
         </div>
       </div>
     );
@@ -360,37 +364,41 @@ const CourseDetail = () => {
     <div className="min-h-screen bg-background">
       <Navigation />
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-6 pt-28 pb-16">
         {/* Breadcrumb */}
         <Link
           to="/attendance"
-          className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
+          className="inline-flex items-center gap-1 text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors mb-10"
         >
-          <ChevronLeft className="h-4 w-4 mr-1" />
+          <ChevronLeft className="h-3.5 w-3.5" />
           All Courses
         </Link>
 
         {/* Course Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-2">
-          <Badge variant="secondary" className="text-base font-mono tracking-wide w-fit px-3 py-1">
+        <div className="mb-3">
+          <span className="text-xs font-mono tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
             {course.courseCode}
-          </Badge>
-          <h1 className="text-2xl sm:text-3xl font-bold">{course.courseName}</h1>
-        </div>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-8">
-          <span className="flex items-center gap-1.5">
-            <Users className="h-4 w-4" />
-            {students.length} {students.length === 1 ? "student" : "students"}
           </span>
-          <button
-            type="button"
-            onClick={copyRegistrationLink}
-            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
-          >
-            <Copy className="h-4 w-4" />
-            Copy registration link
-          </button>
         </div>
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-4">
+          <h1 className="font-serif text-3xl sm:text-4xl md:text-5xl text-foreground">{course.courseName}</h1>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground flex-shrink-0">
+            <span className="flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5" />
+              {students.length} {students.length === 1 ? "student" : "students"}
+            </span>
+            <button
+              type="button"
+              onClick={copyRegistrationLink}
+              className="flex items-center gap-1.5 hover:text-foreground transition-colors tracking-widest uppercase"
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy link
+            </button>
+          </div>
+        </div>
+
+        <div className="h-px bg-border mb-8" />
 
         {/* Active Session Banner */}
         {activeSession && (

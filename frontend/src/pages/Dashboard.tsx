@@ -4,8 +4,7 @@ import { api } from "@/lib/api";
 import Navigation from "@/components/Navigation";
 import ClassroomCard from "@/components/ClassroomCard";
 import CreateClassroomDialog from "@/components/CreateClassroomDialog";
-import { Button } from "@/components/ui/button";
-import { Plus, AlertCircle } from "lucide-react";
+import { Plus, AlertCircle, LayoutGrid } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Classroom, WebSocketMessage } from "@/types/classroom";
@@ -17,7 +16,6 @@ const Dashboard = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load initial classrooms
   useEffect(() => {
     const fetchClassrooms = async () => {
       try {
@@ -25,30 +23,23 @@ const Dashboard = () => {
         const data = await api.classrooms.list();
         setClassrooms(data);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load classrooms"
-        );
+        setError(err instanceof Error ? err.message : "Failed to load classrooms");
       } finally {
         setLoading(false);
       }
     };
-
     fetchClassrooms();
   }, []);
 
-  // WebSocket listener for real-time updates
   const handleWSMessage = useCallback((message: WebSocketMessage) => {
     const incoming = message.classroom;
     setClassrooms((prev) => {
-      const idx = prev.findIndex(
-        (c) => c.id === incoming.id || c.classId === incoming.classId
-      );
+      const idx = prev.findIndex((c) => c.id === incoming.id || c.classId === incoming.classId);
       if (idx !== -1) {
         const copy = [...prev];
         copy[idx] = incoming;
         return copy;
       }
-      // if not found, prepend (or push) the incoming classroom
       return [incoming, ...prev];
     });
   }, []);
@@ -63,52 +54,63 @@ const Dashboard = () => {
       setShowCreateDialog(false);
       setError(null);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create classroom"
-      );
+      setError(err instanceof Error ? err.message : "Failed to create classroom");
     }
   };
 
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+
+      <div className="max-w-7xl mx-auto px-6 pt-28 pb-16">
+        {/* Page header */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6 mb-12">
           <div>
-            <h1 className="text-3xl font-bold">Classrooms</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage and monitor all classrooms
-            </p>
+            <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-3">Live Monitoring</p>
+            <h1 className="font-serif text-4xl md:text-5xl text-foreground">Classrooms</h1>
           </div>
           {isAdmin && (
-            <Button onClick={() => setShowCreateDialog(true)} size="lg">
-              <Plus className="h-4 w-4 mr-2" />
+            <button
+              type="button"
+              onClick={() => setShowCreateDialog(true)}
+              className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
               Add Classroom
-            </Button>
+            </button>
           )}
         </div>
 
+        <div className="h-px bg-border mb-12" />
+
         {error && (
-          <Alert variant="destructive" className="mb-6">
+          <Alert variant="destructive" className="mb-8">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
         {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            </div>
-            <p className="mt-4 text-muted-foreground">Loading classrooms...</p>
+          <div className="flex flex-col items-center py-24 gap-4">
+            <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+            <p className="text-sm text-muted-foreground tracking-wide">Loading classrooms…</p>
           </div>
         ) : classrooms.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground mb-4">No classrooms yet.</p>
+          <div className="flex flex-col items-center py-24 gap-6 text-center">
+            <LayoutGrid className="h-10 w-10 text-muted-foreground/40" />
+            <div>
+              <p className="font-serif text-2xl text-foreground mb-2">No classrooms yet</p>
+              <p className="text-sm text-muted-foreground">Add your first classroom to begin monitoring.</p>
+            </div>
             {isAdmin && (
-              <Button onClick={() => setShowCreateDialog(true)}>
-                Create your first classroom
-              </Button>
+              <button
+                type="button"
+                onClick={() => setShowCreateDialog(true)}
+                className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add Classroom
+              </button>
             )}
           </div>
         ) : (

@@ -1,98 +1,131 @@
 import { Link, useLocation } from "react-router-dom";
-import { Activity, BarChart3, Home, Menu, X, ClipboardList } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const Navigation = () => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Close mobile menu on route change
+  useEffect(() => setIsOpen(false), [location.pathname]);
 
   const links = [
-    { to: "/", label: "Home", icon: Home },
-    { to: "/dashboard", label: "Dashboard", icon: Activity },
-    { to: "/analytics", label: "Analytics", icon: BarChart3 },
-    { to: "/attendance", label: "Attendance", icon: ClipboardList },
+    { to: "/", label: "Home" },
+    { to: "/dashboard", label: "Dashboard" },
+    { to: "/analytics", label: "Analytics" },
+    { to: "/attendance", label: "Attendance" },
   ];
 
-  const isAttendanceActive =
-    location.pathname === "/attendance" ||
-    location.pathname.startsWith("/attendance/");
+  const isActive = (to: string) => {
+    if (to === "/attendance")
+      return location.pathname === "/attendance" || location.pathname.startsWith("/attendance/");
+    return location.pathname === to;
+  };
 
   return (
-    <nav className="border-b border-border bg-card">
-      <div className="container mx-auto px-4">
+    <nav
+      className={cn(
+        "fixed top-0 inset-x-0 z-50 transition-all duration-300",
+        scrolled ? "nav-scrolled" : "bg-transparent"
+      )}
+    >
+      <div className="mx-auto max-w-7xl px-6">
         <div className="flex h-16 items-center justify-between">
-          <div className="flex items-center gap-2">
+
+          {/* Left — nav links (desktop) */}
+          <div className="hidden md:flex items-center gap-8">
+            {links.slice(0, 2).map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className={cn(
+                  "text-xs tracking-widest uppercase transition-colors duration-200",
+                  isActive(link.to)
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+
+          {/* Center — wordmark */}
+          <Link
+            to="/"
+            className="flex items-center gap-2.5 absolute left-1/2 -translate-x-1/2"
+          >
             <img src="/cam.png" alt="Chakam" className="h-6 w-6" />
-            <span className="text-lg font-bold text-foreground">Chakam</span>
+            <span className="font-serif text-xl tracking-wide text-foreground">
+              Chakam
+            </span>
+          </Link>
+
+          {/* Right — nav links (desktop) */}
+          <div className="hidden md:flex items-center gap-8">
+            {links.slice(2).map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className={cn(
+                  "text-xs tracking-widest uppercase transition-colors duration-200",
+                  isActive(link.to)
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex gap-1">
-            {links.map((link) => {
-              const Icon = link.icon;
-              const isActive =
-                link.to === "/attendance"
-                  ? isAttendanceActive
-                  : location.pathname === link.to;
-              return (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="font-medium">{link.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-
-          {/* Mobile Menu Button */}
+          {/* Mobile burger */}
           <button
             type="button"
-            className="md:hidden"
+            className="md:hidden ml-auto text-foreground"
             onClick={() => setIsOpen(!isOpen)}
             aria-label="Toggle menu"
           >
-            {isOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
 
-        {/* Mobile Navigation */}
-        {isOpen && (
-          <div className="md:hidden pb-4 flex flex-col gap-2">
-            {links.map((link) => {
-              const Icon = link.icon;
-              const isActive =
-                link.to === "/attendance"
-                  ? isAttendanceActive
-                  : location.pathname === link.to;
-              return (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  onClick={() => setIsOpen(false)}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="font-medium">{link.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        )}
+        {/* Divider line */}
+        <div className={cn(
+          "h-px transition-opacity duration-300",
+          scrolled ? "opacity-0" : "bg-border opacity-60"
+        )} />
       </div>
+
+      {/* Mobile drawer */}
+      {isOpen && (
+        <div className="md:hidden bg-background/95 backdrop-blur border-t border-border">
+          <div className="px-6 py-6 flex flex-col gap-5">
+            {links.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                className={cn(
+                  "text-sm tracking-widest uppercase transition-colors",
+                  isActive(link.to)
+                    ? "text-foreground"
+                    : "text-muted-foreground"
+                )}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </nav>
   );
 };

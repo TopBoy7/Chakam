@@ -1,6 +1,5 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -11,293 +10,304 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Activity, TrendingUp, Zap, Shield, LogIn, LogOut } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Activity, BarChart3, ClipboardList, ArrowRight, LogIn, LogOut } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
+/* ── Scroll-reveal hook ─────────────────────────────────────────────────── */
+function useReveal() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { el.classList.add("visible"); observer.disconnect(); } },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return ref;
+}
+
+/* ── Feature card data ──────────────────────────────────────────────────── */
+const features = [
+  {
+    label: "01",
+    title: "Real-Time Monitoring",
+    body: "Live classroom status delivered via IoT sensors and WebSocket streams — know occupancy the instant it changes.",
+    to: "/dashboard",
+    cta: "Open Dashboard",
+    Icon: Activity,
+  },
+  {
+    label: "02",
+    title: "Usage Analytics",
+    body: "Fill rates, peak hours, and comparative occupancy across every room — all derived from real sensor data.",
+    to: "/analytics",
+    cta: "View Analytics",
+    Icon: BarChart3,
+  },
+  {
+    label: "03",
+    title: "Attendance Tracking",
+    body: "Facial recognition marks students present automatically. Lecturers can override, export CSV, DOCX, or PDF.",
+    to: "/attendance",
+    cta: "Manage Courses",
+    Icon: ClipboardList,
+  },
+];
+
+/* ── Stat items ─────────────────────────────────────────────────────────── */
+const stats = [
+  { value: "< 5 s", label: "Occupancy update latency" },
+  { value: "5 min", label: "Attendance snapshot interval" },
+  { value: "4", label: "Export formats supported" },
+  { value: "∞", label: "Classrooms monitored" },
+];
+
+/* ======================================================================== */
 const Home = () => {
   const { isAdmin, login, logout } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [loginError, setLoginError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  const heroRef    = useReveal();
+  const statsRef   = useReveal();
+  const feat1Ref   = useReveal();
+  const feat2Ref   = useReveal();
+  const feat3Ref   = useReveal();
+  const footerRef  = useReveal();
+  const featRefs   = [feat1Ref, feat2Ref, feat3Ref];
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (login(password)) {
-      setError("");
+      setLoginError("");
       setPassword("");
       setDialogOpen(false);
       navigate("/dashboard");
     } else {
-      setError("Invalid password");
+      setLoginError("Incorrect password");
     }
   };
 
-  const handleLogout = () => {
-    logout();
-  };
-
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-background via-primary/5 to-background overflow-x-hidden">
+    <div className="min-h-screen bg-background overflow-x-hidden">
       <Navigation />
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="text-center max-w-4xl mx-auto">
-          <div className="mb-6">
-            <img src="/cam.png" alt="Chakam" className="h-16 w-16 mx-auto" />
+      {/* ── Hero ──────────────────────────────────────────────────────────── */}
+      <section className="min-h-screen flex flex-col items-center justify-center text-center px-6 pt-16 pb-24">
+        <div ref={heroRef} className="reveal max-w-3xl mx-auto space-y-8">
+          <div className="inline-flex items-center gap-2 text-xs tracking-[0.2em] uppercase text-muted-foreground border border-border rounded-full px-4 py-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent inline-block" />
+            Smart Classroom System
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+
+          <h1 className="font-serif text-[clamp(3.5rem,10vw,8rem)] leading-[0.95] text-foreground">
             Chakam
           </h1>
-          <p className="text-xl text-muted-foreground mb-8 leading-relaxed">
-            Real-time monitoring and intelligent analytics for efficient
-            classroom management. Track occupancy, analyze patterns, and
-            optimize space utilization across campus.
+
+          <p className="text-muted-foreground text-lg leading-relaxed max-w-xl mx-auto font-light">
+            Real-time occupancy monitoring and automated attendance tracking
+            for every classroom on campus — powered by IoT cameras and
+            facial recognition.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
-            <Link to="/dashboard" className="w-full sm:w-auto">
-              <Button size="lg" className="text-base w-full sm:w-auto">
-                <Activity className="h-5 w-5 mr-2" />
-                View Dashboard
-              </Button>
+
+          <div className="rule-gold w-24 mx-auto" />
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
+            <Link
+              to="/dashboard"
+              className="group inline-flex items-center gap-2 bg-foreground text-background text-sm tracking-widest uppercase px-8 py-3.5 rounded-full hover:bg-foreground/90 transition-colors duration-200"
+            >
+              View Dashboard
+              <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
             </Link>
-            <Link to="/analytics" className="w-full sm:w-auto">
-              <Button
-                size="lg"
-                variant="outline"
-                className="text-base w-full sm:w-auto"
-              >
-                <TrendingUp className="h-5 w-5 mr-2" />
-                View Analytics
-              </Button>
-            </Link>
+
             {isAdmin ? (
-              <Button
-                size="lg"
-                variant="destructive"
-                className="text-base w-full sm:w-auto"
-                onClick={handleLogout}
+              <button
+                type="button"
+                onClick={logout}
+                className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
               >
-                <LogOut className="h-5 w-5 mr-2" />
-                Logout
-              </Button>
+                <LogOut className="h-4 w-4" />
+                Sign Out
+              </button>
             ) : (
               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button
-                    size="lg"
-                    variant="secondary"
-                    className="text-base w-full sm:w-auto"
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
                   >
-                    <LogIn className="h-5 w-5 mr-2" />
+                    <LogIn className="h-4 w-4" />
                     Admin Login
-                  </Button>
+                  </button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-md">
+                <DialogContent className="sm:max-w-sm bg-card">
                   <DialogHeader>
-                    <DialogTitle>Admin Login</DialogTitle>
-                    <DialogDescription>
+                    <DialogTitle className="font-serif text-2xl font-normal">Admin Login</DialogTitle>
+                    <DialogDescription className="text-muted-foreground text-sm">
                       Enter the admin password to manage classrooms.
                     </DialogDescription>
                   </DialogHeader>
-                  <form onSubmit={handleLogin} className="space-y-4">
+                  <form onSubmit={handleLogin} className="space-y-5 pt-2">
                     <div className="space-y-2">
-                      <Label htmlFor="password">Password</Label>
+                      <Label htmlFor="password" className="text-xs tracking-widest uppercase text-muted-foreground">
+                        Password
+                      </Label>
                       <Input
                         id="password"
                         type="password"
-                        placeholder="Enter admin password"
+                        placeholder="••••••••"
                         value={password}
-                        onChange={(e) => {
-                          setPassword(e.target.value);
-                          setError("");
-                        }}
+                        onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
+                        className="bg-background border-border"
                       />
-                      {error && (
-                        <p className="text-sm text-destructive">{error}</p>
-                      )}
+                      {loginError && <p className="text-xs text-destructive">{loginError}</p>}
                     </div>
-                    <Button type="submit" className="w-full">
-                      Login
-                    </Button>
+                    <button
+                      type="submit"
+                      className="w-full bg-foreground text-background text-sm tracking-widest uppercase py-3 rounded-full hover:bg-foreground/90 transition-colors"
+                    >
+                      Enter
+                    </button>
                   </form>
                 </DialogContent>
               </Dialog>
             )}
           </div>
         </div>
-      </section>
 
-      {/* Features Section */}
-      <section className="container mx-auto px-4 py-16">
-        <h2 className="text-3xl font-bold text-center mb-12">
-          System Features
-        </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card className="border-2 hover:border-primary/50 transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                <Activity className="h-6 w-6 text-primary" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Real-Time Monitoring</h3>
-              <p className="text-muted-foreground text-sm">
-                Live classroom status updates using IoT sensors and wireless
-                communication.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-2 hover:border-primary/50 transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="h-12 w-12 rounded-lg bg-success/10 flex items-center justify-center mb-4">
-                <TrendingUp className="h-6 w-6 text-success" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">AI Analytics</h3>
-              <p className="text-muted-foreground text-sm">
-                Predictive analytics and pattern recognition for optimal space
-                planning.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-2 hover:border-primary/50 transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="h-12 w-12 rounded-lg bg-warning/10 flex items-center justify-center mb-4">
-                <Zap className="h-6 w-6 text-warning" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Instant Updates</h3>
-              <p className="text-muted-foreground text-sm">
-                Receive immediate notifications about classroom availability
-                changes.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-2 hover:border-primary/50 transition-all duration-300">
-            <CardContent className="pt-6">
-              <div className="h-12 w-12 rounded-lg bg-accent/10 flex items-center justify-center mb-4">
-                <Shield className="h-6 w-6 text-accent" />
-              </div>
-              <h3 className="font-bold text-lg mb-2">Reliable System</h3>
-              <p className="text-muted-foreground text-sm">
-                ESP32 microcontroller with camera for accurate detection.
-              </p>
-            </CardContent>
-          </Card>
+        {/* Scroll cue */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-muted-foreground/60">
+          <span className="text-[10px] tracking-[0.25em] uppercase">Scroll</span>
+          <div className="h-8 w-px bg-gradient-to-b from-muted-foreground/40 to-transparent" />
         </div>
       </section>
 
-      {/* Technical Overview */}
-
-      {/* Footer */}
-      <footer className="bg-muted/50 py-12 px-4">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div>
-            <div className="flex items-center space-x-2 mb-4">
-              <img src="/cam.png" className="h-10 w-10" alt="Chakam Logo" />
-              <span className="text-foreground font-semibold">Chakam</span>
+      {/* ── Stats strip ───────────────────────────────────────────────────── */}
+      <section className="border-y border-border py-14 px-6">
+        <div ref={statsRef} className="reveal max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-10 text-center">
+          {stats.map((s) => (
+            <div key={s.label}>
+              <p className="font-serif text-4xl md:text-5xl text-foreground">{s.value}</p>
+              <p className="mt-2 text-xs tracking-widest uppercase text-muted-foreground">{s.label}</p>
             </div>
-            <p className="text-muted-foreground text-sm max-w-sm">
-              Intelligent classroom monitoring and analytics platform for
-              efficient space utilization.
-            </p>
-            <div className="flex space-x-3 mt-4">
-              <a
-                href="#twitter"
-                className="text-muted-foreground hover:text-foreground transition"
-              >
-                𝕏
-              </a>
-              <a
-                href="#facebook"
-                className="text-muted-foreground hover:text-foreground transition"
-              >
-                f
-              </a>
-              <a
-                href="#linkedin"
-                className="text-muted-foreground hover:text-foreground transition"
-              >
-                in
-              </a>
-            </div>
-          </div>
+          ))}
+        </div>
+      </section>
 
-          <div>
-            <h6 className="text-foreground font-semibold mb-4">Quick Links</h6>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li>
+      {/* ── Features ─────────────────────────────────────────────────────── */}
+      <section className="py-24 px-6">
+        <div className="max-w-5xl mx-auto space-y-6">
+          {features.map((f, i) => {
+            const Icon = f.Icon;
+            return (
+              <div
+                key={f.label}
+                ref={featRefs[i]}
+                className={`reveal group border border-border rounded-lg p-8 md:p-10 flex flex-col md:flex-row md:items-center gap-8 hover:border-foreground/30 transition-colors duration-300 bg-card/50 ${["reveal-delay-1","reveal-delay-2","reveal-delay-3"][i]}`}
+              >
+                {/* Number + icon */}
+                <div className="flex-shrink-0 flex flex-col items-start gap-4">
+                  <span className="text-xs tracking-[0.2em] text-muted-foreground/60 font-mono">{f.label}</span>
+                  <div className="h-12 w-12 rounded-full border border-border flex items-center justify-center group-hover:border-foreground/30 transition-colors">
+                    <Icon className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1">
+                  <h3 className="font-serif text-2xl md:text-3xl text-foreground mb-3">{f.title}</h3>
+                  <p className="text-muted-foreground text-sm leading-relaxed max-w-lg">{f.body}</p>
+                </div>
+
+                {/* CTA */}
                 <Link
-                  to="/dashboard"
-                  className="hover:text-foreground transition"
+                  to={f.to}
+                  className="flex-shrink-0 inline-flex items-center gap-2 text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors group/link"
                 >
-                  Dashboard
+                  {f.cta}
+                  <ArrowRight className="h-3.5 w-3.5 group-hover/link:translate-x-0.5 transition-transform" />
                 </Link>
-              </li>
-              <li>
-                <Link
-                  to="/analytics"
-                  className="hover:text-foreground transition"
-                >
-                  Analytics
-                </Link>
-              </li>
-              <li>
-                <a href="#about" className="hover:text-foreground transition">
-                  About
-                </a>
-              </li>
-              <li>
-                <a href="#contact" className="hover:text-foreground transition">
-                  Contact
-                </a>
-              </li>
-            </ul>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── How it works ──────────────────────────────────────────────────── */}
+      <section className="py-24 px-6 border-t border-border">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-16">
+            <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-4">How it works</p>
+            <h2 className="font-serif text-4xl md:text-6xl text-foreground">From room to report</h2>
           </div>
 
-          <div>
-            <h6 className="text-foreground font-semibold mb-4">Resources</h6>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li>
-                <a href="#privacy" className="hover:text-foreground transition">
-                  Privacy Policy
-                </a>
-              </li>
-              <li>
-                <a href="#terms" className="hover:text-foreground transition">
-                  Terms of Use
-                </a>
-              </li>
-              <li>
-                <a
-                  href="#documentation"
-                  className="hover:text-foreground transition"
-                >
-                  Documentation
-                </a>
-              </li>
-              <li>
-                <a href="#faq" className="hover:text-foreground transition">
-                  FAQ
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h6 className="text-foreground font-semibold mb-4">Contact Info</h6>
-            <ul className="space-y-3 text-sm text-muted-foreground">
-              <li>Email: info@chakam.com</li>
-              <li>Phone: +1 (555) 123-4567</li>
-              <li>Support: chakam_support@chakam.com</li>
-            </ul>
+          <div className="grid md:grid-cols-3 gap-0 border border-border rounded-lg overflow-hidden">
+            {[
+              { step: "01", title: "Camera sees", desc: "An ESP32-CAM mounted in the classroom captures periodic snapshots every 5 minutes during active sessions." },
+              { step: "02", title: "AI recognises", desc: "Facial recognition compares faces against registered student photos and marks each one present automatically." },
+              { step: "03", title: "Lecturer reviews", desc: "The web dashboard shows live attendance, allows manual overrides, and exports clean reports in any format." },
+            ].map((item, i) => (
+              <div key={item.step} className={`p-8 md:p-10 ${i < 2 ? "border-b md:border-b-0 md:border-r border-border" : ""}`}>
+                <p className="text-xs tracking-[0.2em] text-muted-foreground/60 font-mono mb-6">{item.step}</p>
+                <h3 className="font-serif text-2xl text-foreground mb-3">{item.title}</h3>
+                <p className="text-muted-foreground text-sm leading-relaxed">{item.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="border-t border-border mt-8 pt-8 text-center text-sm text-muted-foreground">
-          <p>&copy; {new Date().getFullYear()} Chakam. All rights reserved.</p>
+      </section>
+
+      {/* ── CTA Banner ───────────────────────────────────────────────────── */}
+      <section className="py-24 px-6 border-t border-border">
+        <div className="max-w-2xl mx-auto text-center space-y-8">
+          <h2 className="font-serif text-4xl md:text-6xl text-foreground leading-tight">
+            Ready to monitor<br />
+            <em className="not-italic text-muted-foreground">every room?</em>
+          </h2>
+          <Link
+            to="/dashboard"
+            className="group inline-flex items-center gap-2 bg-foreground text-background text-sm tracking-widest uppercase px-10 py-4 rounded-full hover:bg-foreground/90 transition-colors duration-200"
+          >
+            Open Dashboard
+            <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+        </div>
+      </section>
+
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <footer ref={footerRef} className="reveal border-t border-border py-12 px-6">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+          <div className="flex items-center gap-2.5">
+            <img src="/cam.png" alt="Chakam" className="h-6 w-6" />
+            <span className="font-serif text-lg text-foreground">Chakam</span>
+          </div>
+
+          <nav className="flex flex-wrap gap-6">
+            {[
+              { label: "Dashboard", to: "/dashboard" },
+              { label: "Analytics", to: "/analytics" },
+              { label: "Attendance", to: "/attendance" },
+            ].map((l) => (
+              <Link
+                key={l.to}
+                to={l.to}
+                className="text-xs tracking-widest uppercase text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+
+          <p className="text-xs text-muted-foreground">
+            © {new Date().getFullYear()} Chakam · All rights reserved
+          </p>
         </div>
       </footer>
     </div>
