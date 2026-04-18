@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Navigation from "@/components/Navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, Clock, Calendar, BarChart3 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   BarChart,
   Bar,
@@ -10,113 +12,117 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  LineChart,
-  Line,
+  Cell,
 } from "recharts";
+import {
+  Users,
+  Building2,
+  TrendingUp,
+  Percent,
+  AlertCircle,
+  ArrowUpRight,
+  ArrowDownRight,
+} from "lucide-react";
 import { api } from "@/lib/api";
-import type { Classroom } from "@/types/classroom";
+import { useClassroomWebSocket } from "@/hooks/useClassroomWebSocket";
+import type { Classroom, WebSocketMessage } from "@/types/classroom";
 
-interface UsagePattern {
-  hour: number;
-  occupancyRate: number;
+function fillRate(c: Classroom) {
+  return c.capacity > 0 ? Math.round((c.occupancy / c.capacity) * 100) : 0;
 }
 
-// Generate mock usage patterns based on classroom data
-const generateUsagePatterns = (classrooms: Classroom[]): UsagePattern[] => {
-  const hours = Array.from({ length: 12 }, (_, i) => i + 8); // 8 AM to 7 PM
-  return hours.map((hour) => ({
-    hour,
-    occupancyRate: Math.round(
-      classrooms.length > 0
-        ? classrooms.reduce(
-            (sum, c) => sum + (c.occupancy / c.capacity) * 100,
-            0
-          ) /
-            classrooms.length +
-            Math.sin((hour - 8) * 0.5) * 20 // Add some variation
-        : 0
-    ),
-  }));
-};
+function statusInfo(rate: number): {
+  label: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+  dot: string;
+} {
+  if (rate === 0) return { label: "Empty", variant: "secondary", dot: "bg-muted-foreground/40" };
+  if (rate < 50) return { label: "Low", variant: "outline", dot: "bg-success" };
+  if (rate < 80) return { label: "Moderate", variant: "default", dot: "bg-warning" };
+  return { label: "High", variant: "destructive", dot: "bg-destructive" };
+}
 
-// Generate mock weekly data
-const generateWeeklyData = (classrooms: Classroom[]) => {
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const baseOccupancy =
-    classrooms.length > 0
-      ? classrooms.reduce(
-          (sum, c) => sum + (c.occupancy / c.capacity) * 100,
-          0
-        ) / classrooms.length
-      : 0;
-  return days.map((day, i) => ({
-    day,
-    occupancy: Math.round(
-      baseOccupancy + (Math.random() - 0.5) * 20 + (i < 5 ? 10 : -20)
-    ),
-  }));
-};
+function barColor(rate: number) {
+  if (rate === 0) return "hsl(var(--muted-foreground) / 0.3)";
+  if (rate < 50) return "hsl(var(--success))";
+  if (rate < 80) return "hsl(var(--warning))";
+  return "hsl(var(--destructive))";
+}
 
 const Analytics = () => {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [loading, setLoading] = useState(true);
-  const [usagePatterns, setUsagePatterns] = useState<UsagePattern[]>([]);
-  const [weeklyData, setWeeklyData] = useState<
-    Array<{ day: string; occupancy: number }>
-  >([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const data = await api.classrooms.list();
         setClassrooms(data);
-        setUsagePatterns(generateUsagePatterns(data));
-        setWeeklyData(generateWeeklyData(data));
-      } catch (error) {
-        console.error("Failed to fetch classrooms:", error);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load classrooms");
       } finally {
         setLoading(false);
       }
     };
     fetchData();
   }, []);
-  // Calculate average occupancy
-  const avgOccupancy =
-    classrooms.length > 0
-      ? Math.round(
-          classrooms.reduce(
-            (sum, c) => sum + (c.occupancy / c.capacity) * 100,
-            0
-          ) / classrooms.length
-        )
-      : 0;
 
-  // Find peak hour
-  const peakHour =
-    usagePatterns.length > 0
-      ? usagePatterns.reduce((max, pattern) =>
-          pattern.occupancyRate > max.occupancyRate ? pattern : max
-        )
-      : { hour: 0, occupancyRate: 0 };
+  const handleWSMessage = useCallback((message: WebSocketMessage) => {
+    const incoming = message.classroom;
+    setClassrooms((prev) => {
+      const idx = prev.findIndex(
+        (c) => c.id === incoming.id || c.classId === incoming.classId
+      );
+      if (idx !== -1) {
+        const copy = [...prev];
+        copy[idx] = incoming;
+        return copy;
+      }
+      return [incoming, ...prev];
+    });
+  }, []);
 
-  // Calculate weekly trend
-  const weeklyTrend =
-    weeklyData.length >= 2
-      ? Math.round(
-          ((weeklyData[weeklyData.length - 1].occupancy -
-            weeklyData[0].occupancy) /
-            weeklyData[0].occupancy) *
-            100
-        )
-      : 0;
+  useClassroomWebSocket(handleWSMessage);
 
+  // ── Derived stats ────────────────────────────────────────────────────────────
+  const totalCapacity = classrooms.reduce((sum, c) => sum + c.capacity, 0);
+  const totalOccupied = classrooms.reduce((sum, c) => sum + c.occupancy, 0);
+  const totalAvailable = totalCapacity - totalOccupied;
+  const overallRate =
+    totalCapacity > 0 ? Math.round((totalOccupied / totalCapacity) * 100) : 0;
+
+  const statusCounts = {
+    empty: classrooms.filter((c) => c.occupancy === 0).length,
+    low: classrooms.filter((c) => { const r = fillRate(c); return r > 0 && r < 50; }).length,
+    moderate: classrooms.filter((c) => { const r = fillRate(c); return r >= 50 && r < 80; }).length,
+    high: classrooms.filter((c) => fillRate(c) >= 80).length,
+  };
+
+  const chartData = [...classrooms]
+    .sort((a, b) => fillRate(b) - fillRate(a))
+    .map((c) => ({
+      name:
+        c.className.length > 14 ? c.className.slice(0, 13) + "…" : c.className,
+      fullName: c.className,
+      classId: c.classId,
+      occupancy: c.occupancy,
+      capacity: c.capacity,
+      rate: fillRate(c),
+    }));
+
+  const sortedByRate = [...classrooms].sort((a, b) => fillRate(b) - fillRate(a));
+  const mostOccupied = sortedByRate[0] ?? null;
+  const leastOccupied = sortedByRate[sortedByRate.length - 1] ?? null;
+
+  // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
             <p className="text-muted-foreground">Loading analytics...</p>
           </div>
         </div>
@@ -129,205 +135,318 @@ const Analytics = () => {
       <Navigation />
 
       <main className="container mx-auto px-4 py-8">
+        {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Analytics & Insights</h1>
+          <h1 className="text-3xl font-bold mb-1">Analytics</h1>
           <p className="text-muted-foreground">
-            AI-powered predictions and usage pattern analysis
+            Live occupancy overview — updates automatically
           </p>
         </div>
 
-        {/* Key Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="border-2 border-primary/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" />
-                Average Occupancy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-primary">{avgOccupancy}%</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Across {classrooms.length} monitored classrooms
-              </p>
-            </CardContent>
-          </Card>
+        {error && (
+          <Alert variant="destructive" className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          <Card className="border-2 border-warning/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                Peak Usage Time
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-warning">
-                {peakHour.hour}:00
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {peakHour.occupancyRate}% occupancy rate
-              </p>
-            </CardContent>
-          </Card>
+        {classrooms.length === 0 ? (
+          <div className="text-center py-24">
+            <Building2 className="h-14 w-14 text-muted-foreground mx-auto mb-4 opacity-40" />
+            <p className="text-xl font-semibold mb-2">No classrooms yet</p>
+            <p className="text-muted-foreground">
+              Add classrooms in the Dashboard to see analytics here.
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* ── Top stats ──────────────────────────────────────────────────── */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 uppercase tracking-wide">
+                    <Building2 className="h-3.5 w-3.5" />
+                    Classrooms
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold">{classrooms.length}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {statusCounts.empty} empty ·{" "}
+                    {classrooms.length - statusCounts.empty} in use
+                  </p>
+                </CardContent>
+              </Card>
 
-          <Card className="border-2 border-success/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                Weekly Trend
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-success">
-                {weeklyTrend > 0 ? "+" : ""}
-                {weeklyTrend}%
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {weeklyTrend > 0 ? "Increase" : "Decrease"} from week start
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 uppercase tracking-wide">
+                    <Users className="h-3.5 w-3.5" />
+                    Occupants
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold">{totalOccupied}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    of {totalCapacity} total seats
+                  </p>
+                </CardContent>
+              </Card>
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-primary" />
-                Hourly Occupancy Pattern
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {usagePatterns.length > 0 ? (
-                <>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={usagePatterns}>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 uppercase tracking-wide">
+                    <Percent className="h-3.5 w-3.5" />
+                    Fill Rate
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold">{overallRate}%</p>
+                  <Progress value={overallRate} className="mt-2 h-1.5" />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-medium text-muted-foreground flex items-center gap-1.5 uppercase tracking-wide">
+                    <TrendingUp className="h-3.5 w-3.5" />
+                    Available
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold">{totalAvailable}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    seats free right now
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* ── Status breakdown + bar chart ───────────────────────────────── */}
+            <div className="grid lg:grid-cols-3 gap-6 mb-6">
+              {/* Status breakdown */}
+              <div className="space-y-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Status Breakdown</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {[
+                      { label: "Empty (0%)", count: statusCounts.empty, dot: "bg-muted-foreground/40" },
+                      { label: "Low (1–49%)", count: statusCounts.low, dot: "bg-success" },
+                      { label: "Moderate (50–79%)", count: statusCounts.moderate, dot: "bg-warning" },
+                      { label: "High (≥80%)", count: statusCounts.high, dot: "bg-destructive" },
+                    ].map(({ label, count, dot }) => (
+                      <div key={label} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${dot}`} />
+                            {label}
+                          </span>
+                          <span className="font-semibold tabular-nums">{count}</span>
+                        </div>
+                        {classrooms.length > 0 && (
+                          <Progress
+                            value={(count / classrooms.length) * 100}
+                            className="h-1"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                {/* Spotlight cards */}
+                {mostOccupied && leastOccupied && mostOccupied.id !== leastOccupied.id && (
+                  <div className="space-y-3">
+                    <Card className="border-destructive/30 bg-destructive/5">
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-muted-foreground mb-0.5 flex items-center gap-1">
+                              <ArrowUpRight className="h-3 w-3 text-destructive" />
+                              Most occupied
+                            </p>
+                            <p className="font-semibold text-sm truncate">{mostOccupied.className}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{mostOccupied.classId}</p>
+                          </div>
+                          <p className="text-2xl font-bold text-destructive flex-shrink-0">
+                            {fillRate(mostOccupied)}%
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-success/30 bg-success/5">
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-muted-foreground mb-0.5 flex items-center gap-1">
+                              <ArrowDownRight className="h-3 w-3 text-success" />
+                              Least occupied
+                            </p>
+                            <p className="font-semibold text-sm truncate">{leastOccupied.className}</p>
+                            <p className="text-xs text-muted-foreground font-mono">{leastOccupied.classId}</p>
+                          </div>
+                          <p className="text-2xl font-bold text-success flex-shrink-0">
+                            {fillRate(leastOccupied)}%
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+              </div>
+
+              {/* Bar chart */}
+              <Card className="lg:col-span-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">Occupancy by Classroom</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <BarChart
+                      data={chartData}
+                      margin={{ top: 4, right: 4, left: -24, bottom: 0 }}
+                    >
                       <CartesianGrid
                         strokeDasharray="3 3"
                         stroke="hsl(var(--border))"
+                        vertical={false}
                       />
                       <XAxis
-                        dataKey="hour"
-                        stroke="hsl(var(--muted-foreground))"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
+                        dataKey="name"
+                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        interval={0}
                       />
                       <YAxis
-                        stroke="hsl(var(--muted-foreground))"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
+                        domain={[0, 100]}
+                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v) => `${v}%`}
                       />
                       <Tooltip
+                        cursor={{ fill: "hsl(var(--muted) / 0.4)" }}
                         contentStyle={{
                           backgroundColor: "hsl(var(--card))",
                           border: "1px solid hsl(var(--border))",
                           borderRadius: "8px",
+                          fontSize: "12px",
                         }}
+                        formatter={(value, _name, props) => [
+                          `${value}%  (${props.payload.occupancy} / ${props.payload.capacity})`,
+                          "Occupancy",
+                        ]}
+                        labelFormatter={(_label, payload) =>
+                          payload?.[0]?.payload?.fullName ?? _label
+                        }
                       />
-                      <Bar
-                        dataKey="occupancyRate"
-                        fill="hsl(var(--primary))"
-                        radius={[8, 8, 0, 0]}
-                      />
+                      <Bar dataKey="rate" radius={[5, 5, 0, 0]} maxBarSize={52}>
+                        {chartData.map((entry, index) => (
+                          <Cell key={index} fill={barColor(entry.rate)} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                  <p className="text-sm text-muted-foreground mt-4 text-center">
-                    Peak hour: {peakHour.hour}:00 - {peakHour.hour + 1}:00
-                  </p>
-                </>
-              ) : (
-                <p className="text-center text-muted-foreground">
-                  No data available
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                  <div className="flex items-center gap-4 mt-3 justify-center flex-wrap">
+                    {[
+                      { color: "bg-success", label: "Low (<50%)" },
+                      { color: "bg-warning", label: "Moderate (50–79%)" },
+                      { color: "bg-destructive", label: "High (≥80%)" },
+                    ].map(({ color, label }) => (
+                      <span key={label} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className={`h-2 w-2 rounded-full ${color}`} />
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                Weekly Occupancy Trend
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {weeklyData.length > 0 ? (
-                <>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={weeklyData}>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="hsl(var(--border))"
-                      />
-                      <XAxis
-                        dataKey="day"
-                        stroke="hsl(var(--muted-foreground))"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
-                      />
-                      <YAxis
-                        stroke="hsl(var(--muted-foreground))"
-                        tick={{ fill: "hsl(var(--muted-foreground))" }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="occupancy"
-                        stroke="hsl(var(--success))"
-                        strokeWidth={3}
-                        dot={{ fill: "hsl(var(--success))", r: 6 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                  <p className="text-sm text-muted-foreground mt-4 text-center">
-                    {weeklyData.length} days of data
-                  </p>
-                </>
-              ) : (
-                <p className="text-center text-muted-foreground">
-                  No data available
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* AI Predictions */}
-        <Card className="mt-6 border-2 border-primary/20 bg-gradient-to-br from-card to-primary/5">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              AI Predictions & Recommendations
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 rounded-lg bg-background/50 border border-border">
-              <h4 className="font-semibold mb-2">📊 Usage Forecast</h4>
-              <p className="text-sm text-muted-foreground">
-                Expected peak occupancy: {peakHour.occupancyRate}% at{" "}
-                {peakHour.hour}:00
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-background/50 border border-border">
-              <h4 className="font-semibold mb-2">💡 Optimization Suggestion</h4>
-              <p className="text-sm text-muted-foreground">
-                Current average occupancy is {avgOccupancy}%. Consider
-                redistributing classes for optimal space utilization.
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-background/50 border border-border">
-              <h4 className="font-semibold mb-2">⚠️ Anomaly Detection</h4>
-              <p className="text-sm text-muted-foreground">
-                No anomalies detected. All sensor readings are within expected
-                ranges.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+            {/* ── Full classroom table ────────────────────────────────────────── */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">All Classrooms</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        <th className="text-left px-5 py-3 font-medium text-muted-foreground">
+                          Classroom
+                        </th>
+                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">
+                          Occupied
+                        </th>
+                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">
+                          Capacity
+                        </th>
+                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">
+                          Free
+                        </th>
+                        <th className="px-4 py-3 font-medium text-muted-foreground w-36">
+                          Fill rate
+                        </th>
+                        <th className="text-center px-5 py-3 font-medium text-muted-foreground">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {sortedByRate.map((c) => {
+                        const rate = fillRate(c);
+                        const { label, variant } = statusInfo(rate);
+                        return (
+                          <tr
+                            key={c.id}
+                            className="hover:bg-muted/30 transition-colors"
+                          >
+                            <td className="px-5 py-3">
+                              <p className="font-medium">{c.className}</p>
+                              <p className="text-xs text-muted-foreground font-mono">
+                                {c.classId}
+                              </p>
+                            </td>
+                            <td className="text-right px-4 py-3 tabular-nums font-semibold">
+                              {c.occupancy}
+                            </td>
+                            <td className="text-right px-4 py-3 tabular-nums text-muted-foreground">
+                              {c.capacity}
+                            </td>
+                            <td className="text-right px-4 py-3 tabular-nums text-muted-foreground">
+                              {c.capacity - c.occupancy}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <Progress
+                                  value={rate}
+                                  className="flex-1 h-1.5 min-w-[60px]"
+                                />
+                                <span className="tabular-nums text-xs w-9 text-right">
+                                  {rate}%
+                                </span>
+                              </div>
+                            </td>
+                            <td className="text-center px-5 py-3">
+                              <Badge variant={variant} className="text-xs">
+                                {label}
+                              </Badge>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </main>
     </div>
   );
