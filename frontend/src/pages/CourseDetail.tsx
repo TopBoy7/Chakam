@@ -82,6 +82,8 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
+import { exportAttendance } from "@/lib/exportAttendance";
+import type { ExportFormat } from "@/lib/exportAttendance";
 import type { Course, RegisteredStudent, Session, AttendanceRecord } from "@/types/attendance";
 import type { Classroom } from "@/types/classroom";
 
@@ -292,29 +294,10 @@ const CourseDetail = () => {
     });
   };
 
-  // ── Export helpers ───────────────────────────────────────────────────────────
+  // ── Export helper ────────────────────────────────────────────────────────────
 
-  // Creates a temporary <a> element, triggers a download, then cleans up.
-  const downloadFile = (content: string, filename: string, mimeType: string) => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportSession = async (
-    session: Session,
-    exportFormat: "csv" | "json"
-  ) => {
+  const handleExportSession = async (session: Session, fmt: ExportFormat) => {
     if (!course) return;
-
-    // Active session: records are already in state from the 30s poll.
-    // Past sessions: fetch from GET /attendance/sessions/:id/attendance on demand.
     let records: AttendanceRecord[];
     if (session.status === "active") {
       records = attendanceRecords;
@@ -329,107 +312,11 @@ const CourseDetail = () => {
       }
       setExportingSessionId(null);
     }
-
-    // Cross-reference every registered student with their attendance record.
-    // Students with no record are absent (not yet detected by the camera).
-    const rows = students.map((student) => {
-      const record = records.find((r) => r.studentId === student.id);
-      return {
-        matricNumber: student.matricNumber,
-        status: record?.status ?? "absent",
-        method: record
-          ? record.manuallyOverridden
-            ? "manual"
-            : "camera"
-          : null,
-        detectedAt: record?.detectedAt ?? null,
-      };
-    });
-
-    const presentCount = rows.filter((r) => r.status === "present").length;
-    const attendanceRate =
-      students.length > 0
-        ? `${Math.round((presentCount / students.length) * 100)}%`
-        : "0%";
-
-    const sessionDate = format(new Date(session.startedAt), "MMMM d, yyyy");
-    const sessionStart = format(new Date(session.startedAt), "h:mm a");
-    const sessionEnd = session.endedAt
-      ? format(new Date(session.endedAt), "h:mm a")
-      : "ongoing";
-    const durationMin = session.endedAt
-      ? Math.round(
-          (new Date(session.endedAt).getTime() -
-            new Date(session.startedAt).getTime()) /
-            60000
-        )
-      : null;
-
-    // Sanitise course code for use in the filename (remove spaces/slashes).
-    const safeCode = course.courseCode.replace(/[^a-zA-Z0-9]/g, "_");
-    const safeDate = format(new Date(session.startedAt), "yyyy-MM-dd");
-    const filename = `${safeCode}_${safeDate}_attendance`;
-
-    if (exportFormat === "csv") {
-      const header = [
-        `Course,${course.courseCode} - ${course.courseName}`,
-        `Session Date,${sessionDate}`,
-        `Session Time,${sessionStart}${session.endedAt ? ` - ${sessionEnd} (${durationMin} min)` : ""}`,
-        session.classroomName ? `Classroom,${session.classroomName}` : "",
-        `Exported,"${new Date().toLocaleString()}"`,
-        "",
-        "Matric Number,Status,Method,Detected At",
-      ].filter(Boolean);
-
-      const dataRows = rows.map((r) =>
-        [
-          r.matricNumber,
-          r.status === "present" ? "Present" : "Absent",
-          r.method ?? "",
-          r.detectedAt ?? "",
-        ].join(",")
-      );
-
-      const footer = [
-        "",
-        `Summary,${presentCount} present of ${students.length} (${attendanceRate})`,
-      ];
-
-      downloadFile(
-        [...header, ...dataRows, ...footer].join("\n"),
-        `${filename}.csv`,
-        "text/csv;charset=utf-8;"
-      );
-    } else {
-      const payload = {
-        course: `${course.courseCode} - ${course.courseName}`,
-        courseCode: course.courseCode,
-        session: {
-          id: session.id,
-          date: sessionDate,
-          startTime: sessionStart,
-          endTime: session.endedAt ? sessionEnd : null,
-          durationMinutes: durationMin,
-          classroom: session.classroomName ?? null,
-          status: session.status,
-        },
-        exportedAt: new Date().toISOString(),
-        attendance: rows,
-        summary: {
-          present: presentCount,
-          absent: students.length - presentCount,
-          total: students.length,
-          attendanceRate,
-        },
-      };
-      downloadFile(
-        JSON.stringify(payload, null, 2),
-        `${filename}.json`,
-        "application/json"
-      );
+    try {
+      await exportAttendance(fmt, course, session, students, records);
+    } catch {
+      toast.error("Export failed. Please try again.");
     }
-
-    toast.success(`Attendance exported as ${exportFormat.toUpperCase()}`);
   };
 
   const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
@@ -633,6 +520,16 @@ const CourseDetail = () => {
                                   >
                                     Export as JSON
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleExportSession(session, "docx")}
+                                  >
+                                    Export as Word (.docx)
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleExportSession(session, "pdf")}
+                                  >
+                                    Export as PDF
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </div>
@@ -793,7 +690,7 @@ const CourseDetail = () => {
                           <ChevronDown className="h-3.5 w-3.5 ml-auto" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem
                           onClick={() => handleExportSession(activeSession, "csv")}
                         >
@@ -803,6 +700,16 @@ const CourseDetail = () => {
                           onClick={() => handleExportSession(activeSession, "json")}
                         >
                           Export as JSON
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleExportSession(activeSession, "docx")}
+                        >
+                          Export as Word (.docx)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleExportSession(activeSession, "pdf")}
+                        >
+                          Export as PDF
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
