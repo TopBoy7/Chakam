@@ -1,3 +1,26 @@
+// =============================================================================
+// PAGE: /attendance  — Lecturer's course management hub
+// =============================================================================
+// What this page does:
+//   - Shows all courses the lecturer has created (GET /attendance/courses)
+//   - Lets the lecturer create a new course (POST /attendance/courses)
+//   - Lets the lecturer delete a course with confirmation (DELETE /attendance/courses/:id)
+//   - Provides a "Copy Registration Link" button per course that copies the
+//     public student sign-up URL to clipboard:
+//       {window.location.origin}/register/{course.registrationToken}
+//     Students open this link to register their matric number + photo.
+//   - Navigates to /attendance/course/:courseId for session and attendance management
+//
+// Auth: Only admins (lecturers) can see this page's content. Non-admins see a
+// login prompt. This is enforced client-side via useAuth(); the backend does
+// not yet have per-lecturer authentication.
+//
+// APIs used on this page:
+//   GET    /attendance/courses            → load course list on mount
+//   POST   /attendance/courses            → create course (courseCode + courseName)
+//   DELETE /attendance/courses/:courseId  → delete course + cascade
+// =============================================================================
+
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navigation from "@/components/Navigation";
@@ -54,6 +77,8 @@ const Attendance = () => {
   const [courseToDelete, setCourseToDelete] = useState<Course | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Re-fetches the full course list after create/delete so studentCount stays accurate.
+  // The backend computes studentCount dynamically, so a fresh GET is the simplest approach.
   const fetchCourses = async () => {
     try {
       setError(null);
@@ -70,6 +95,9 @@ const Attendance = () => {
     fetchCourses();
   }, []);
 
+  // Sends courseCode uppercased — the frontend normalises it before the request.
+  // The backend returns the full Course object (including the new registrationToken)
+  // which is why we re-fetch rather than optimistically inserting a partial object.
   const handleCreateCourse = async () => {
     if (!courseCode.trim() || !courseName.trim()) return;
     setCreating(true);
@@ -105,6 +133,10 @@ const Attendance = () => {
     }
   };
 
+  // Builds the public student registration URL using the course's registrationToken.
+  // The token (not the courseId) is in the URL for a layer of obscurity — random UUIDs
+  // are harder to guess than sequential IDs.
+  // The backend resolves this token via GET /attendance/register/:token.
   const copyRegistrationLink = (course: Course) => {
     const link = `${window.location.origin}/register/${course.registrationToken}`;
     navigator.clipboard.writeText(link).then(() => {

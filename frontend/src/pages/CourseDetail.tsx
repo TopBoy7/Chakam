@@ -1,3 +1,41 @@
+// =============================================================================
+// PAGE: /attendance/course/:courseId  — Course detail & live session management
+// =============================================================================
+// What this page does:
+//   - Loads a course's full detail: name, registered students, session history
+//   - Shows an inline classroom selector so the lecturer picks which room they're in
+//   - "Start Class" → POST /attendance/sessions → activates facial recognition
+//     on the selected classroom's camera (identified by classroom.deviceId)
+//   - While a session is active:
+//       • Displays a live timer counting up from startedAt
+//       • Shows the active classroom name + deviceId so it's clear which camera is live
+//       • Polls GET /attendance/sessions/:id/attendance every 30 seconds to pick up
+//         students newly detected by the camera
+//       • Lets the lecturer manually toggle any student present/absent
+//         → PUT /attendance/sessions/:id/attendance/:studentId
+//   - "End Class" → POST /attendance/sessions/:id/end → stops recognition, saves records
+//   - Sessions tab: history of past sessions (ended only) with date, room, duration, count
+//   - Students tab: all registered students with photo thumbnail and registration date
+//
+// APIs used on this page:
+//   GET  /attendance/courses/:id                         → course info
+//   GET  /attendance/courses/:id/students                → registered student list
+//   GET  /attendance/courses/:id/sessions                → session history
+//   GET  /classrooms                                     → classroom list for selector
+//   POST /attendance/sessions                            → start session (body: courseId, classroomId)
+//   POST /attendance/sessions/:id/end                   → end session
+//   GET  /attendance/sessions/:id/attendance             → polled every 30s during active session
+//   PUT  /attendance/sessions/:id/attendance/:studentId → manual present/absent toggle
+//
+// KEY BEHAVIOUR NOTES FOR BACKEND:
+//   1. classroomId sent on session start is the classroom's MongoDB _id.
+//      Use it to look up the classroom's `deviceId` — that is the camera identifier.
+//   2. The backend must NOT overwrite manuallyOverridden=true records when the
+//      facial recognition pipeline processes a new snapshot.
+//   3. The backend should return classroomName in the Session object so the
+//      frontend can display it without an extra request.
+// =============================================================================
+
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { format } from "date-fns";
@@ -17,6 +55,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   ChevronLeft,
   AlertCircle,
   Users,
@@ -31,6 +75,9 @@ import {
   Copy,
   MapPin,
   Cpu,
+  Download,
+  ChevronDown,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -70,10 +117,15 @@ const CourseDetail = () => {
   const [ending, setEnding] = useState(false);
   const [elapsed, setElapsed] = useState("");
   const [updatingStudent, setUpdatingStudent] = useState<string | null>(null);
+  const [exportingSessionId, setExportingSessionId] = useState<string | null>(null);
 
+  // Derived from the sessions list — at most one session has status "active" at a time.
+  // The backend must enforce this: reject POST /attendance/sessions if an active session
+  // already exists for the given courseId.
   const activeSession = sessions.find((s) => s.status === "active") ?? null;
 
-  // Live session timer
+  // Ticks every second to display a live elapsed timer (e.g. "01m 23s") in the banner.
+  // Purely client-side — startedAt from the backend is the source of truth.
   useEffect(() => {
     if (!activeSession) return;
     const tick = () => setElapsed(formatElapsed(activeSession.startedAt));
@@ -82,7 +134,11 @@ const CourseDetail = () => {
     return () => clearInterval(id);
   }, [activeSession?.startedAt]);
 
-  // Poll attendance records every 30s during active session
+  // Polls GET /attendance/sessions/:id/attendance every 30 seconds while a session is active.
+  // The camera takes a snapshot every 5 minutes and the recognition pipeline may take
+  // additional seconds to process it, so 30s polling is a good balance between freshness
+  // and request volume. Each poll replaces the full records array — the backend is the
+  // source of truth. Polling errors are silently swallowed to avoid disrupting the UI.
   useEffect(() => {
     if (!activeSession) return;
     const fetchAttendance = async () => {
@@ -98,15 +154,18 @@ const CourseDetail = () => {
     return () => clearInterval(id);
   }, [activeSession?.id]);
 
+  // Loads all page data in parallel on mount. The classrooms list is also fetched
+  // here because the lecturer needs it for the "Select Classroom" dropdown on this page.
+  // The classrooms come from the existing /classrooms endpoint — no new backend work needed.
   const loadData = useCallback(async () => {
     if (!courseId) return;
     try {
       setError(null);
       const [courseData, studentsData, sessionsData, classroomsData] = await Promise.all([
-        api.attendance.courses.get(courseId),
-        api.attendance.students.list(courseId),
-        api.attendance.sessions.list(courseId),
-        api.classrooms.list(),
+        api.attendance.courses.get(courseId),           // GET /attendance/courses/:id
+        api.attendance.students.list(courseId),          // GET /attendance/courses/:id/students
+        api.attendance.sessions.list(courseId),          // GET /attendance/courses/:id/sessions
+        api.classrooms.list(),                           // GET /classrooms (existing endpoint)
       ]);
       setCourse(courseData);
       setStudents(studentsData);
@@ -123,6 +182,11 @@ const CourseDetail = () => {
     loadData();
   }, [loadData]);
 
+  // Sends { courseId, classroomId } to POST /attendance/sessions.
+  // `classroomId` is the classroom's MongoDB _id — the backend uses this to look up
+  // the classroom's `deviceId` and activate facial recognition on that camera.
+  // After the session is created, we enrich the returned Session object locally with
+  // `classroomName` (in case the backend omits it) so the UI can display it immediately.
   const handleStartClass = async () => {
     if (!courseId || !selectedClassroomId) return;
     setStarting(true);
@@ -142,6 +206,11 @@ const CourseDetail = () => {
     }
   };
 
+  // Calls POST /attendance/sessions/:id/end.
+  // The backend should: set status="ended", set endedAt, compute final presentCount
+  // and totalStudents, and stop the facial recognition pipeline for this classroom.
+  // The frontend updates local state optimistically using the current attendanceRecords
+  // so the session card appears immediately in the Sessions tab.
   const handleEndClass = async () => {
     if (!activeSession) return;
     setEnding(true);
@@ -169,6 +238,13 @@ const CourseDetail = () => {
     }
   };
 
+  // Handles the lecturer manually marking a student present or absent.
+  // Uses an UPSERT pattern:
+  //   - If a record already exists for this student in this session → update status
+  //   - If no record exists yet (student not detected by camera) → create a new one
+  // In both cases `manuallyOverridden: true` is set, which tells the backend's
+  // recognition pipeline NOT to overwrite this record on the next snapshot.
+  // State is updated optimistically — the spinner appears per-student, not globally.
   const handleToggleStudentPresence = async (student: RegisteredStudent) => {
     if (!activeSession) return;
     const record = attendanceRecords.find((r) => r.studentId === student.id);
@@ -176,6 +252,7 @@ const CourseDetail = () => {
     const newStatus: "present" | "absent" = currentStatus === "present" ? "absent" : "present";
     setUpdatingStudent(student.id);
     try {
+      // PUT /attendance/sessions/:sessionId/attendance/:studentId  { status }
       await api.attendance.sessions.updateAttendance(activeSession.id, student.id, newStatus);
       setAttendanceRecords((prev) => {
         const existing = prev.find((r) => r.studentId === student.id);
@@ -186,6 +263,8 @@ const CourseDetail = () => {
               : r
           );
         }
+        // Student had no record (never detected) — create a local placeholder.
+        // The backend creates the real document; on the next 30s poll this is replaced.
         return [
           ...prev,
           {
@@ -211,6 +290,146 @@ const CourseDetail = () => {
     navigator.clipboard.writeText(link).then(() => {
       toast.success("Registration link copied to clipboard");
     });
+  };
+
+  // ── Export helpers ───────────────────────────────────────────────────────────
+
+  // Creates a temporary <a> element, triggers a download, then cleans up.
+  const downloadFile = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportSession = async (
+    session: Session,
+    exportFormat: "csv" | "json"
+  ) => {
+    if (!course) return;
+
+    // Active session: records are already in state from the 30s poll.
+    // Past sessions: fetch from GET /attendance/sessions/:id/attendance on demand.
+    let records: AttendanceRecord[];
+    if (session.status === "active") {
+      records = attendanceRecords;
+    } else {
+      setExportingSessionId(session.id);
+      try {
+        records = await api.attendance.sessions.getAttendance(session.id);
+      } catch {
+        toast.error("Failed to load attendance data for export");
+        setExportingSessionId(null);
+        return;
+      }
+      setExportingSessionId(null);
+    }
+
+    // Cross-reference every registered student with their attendance record.
+    // Students with no record are absent (not yet detected by the camera).
+    const rows = students.map((student) => {
+      const record = records.find((r) => r.studentId === student.id);
+      return {
+        matricNumber: student.matricNumber,
+        status: record?.status ?? "absent",
+        method: record
+          ? record.manuallyOverridden
+            ? "manual"
+            : "camera"
+          : null,
+        detectedAt: record?.detectedAt ?? null,
+      };
+    });
+
+    const presentCount = rows.filter((r) => r.status === "present").length;
+    const attendanceRate =
+      students.length > 0
+        ? `${Math.round((presentCount / students.length) * 100)}%`
+        : "0%";
+
+    const sessionDate = format(new Date(session.startedAt), "MMMM d, yyyy");
+    const sessionStart = format(new Date(session.startedAt), "h:mm a");
+    const sessionEnd = session.endedAt
+      ? format(new Date(session.endedAt), "h:mm a")
+      : "ongoing";
+    const durationMin = session.endedAt
+      ? Math.round(
+          (new Date(session.endedAt).getTime() -
+            new Date(session.startedAt).getTime()) /
+            60000
+        )
+      : null;
+
+    // Sanitise course code for use in the filename (remove spaces/slashes).
+    const safeCode = course.courseCode.replace(/[^a-zA-Z0-9]/g, "_");
+    const safeDate = format(new Date(session.startedAt), "yyyy-MM-dd");
+    const filename = `${safeCode}_${safeDate}_attendance`;
+
+    if (exportFormat === "csv") {
+      const header = [
+        `Course,${course.courseCode} - ${course.courseName}`,
+        `Session Date,${sessionDate}`,
+        `Session Time,${sessionStart}${session.endedAt ? ` - ${sessionEnd} (${durationMin} min)` : ""}`,
+        session.classroomName ? `Classroom,${session.classroomName}` : "",
+        `Exported,"${new Date().toLocaleString()}"`,
+        "",
+        "Matric Number,Status,Method,Detected At",
+      ].filter(Boolean);
+
+      const dataRows = rows.map((r) =>
+        [
+          r.matricNumber,
+          r.status === "present" ? "Present" : "Absent",
+          r.method ?? "",
+          r.detectedAt ?? "",
+        ].join(",")
+      );
+
+      const footer = [
+        "",
+        `Summary,${presentCount} present of ${students.length} (${attendanceRate})`,
+      ];
+
+      downloadFile(
+        [...header, ...dataRows, ...footer].join("\n"),
+        `${filename}.csv`,
+        "text/csv;charset=utf-8;"
+      );
+    } else {
+      const payload = {
+        course: `${course.courseCode} - ${course.courseName}`,
+        courseCode: course.courseCode,
+        session: {
+          id: session.id,
+          date: sessionDate,
+          startTime: sessionStart,
+          endTime: session.endedAt ? sessionEnd : null,
+          durationMinutes: durationMin,
+          classroom: session.classroomName ?? null,
+          status: session.status,
+        },
+        exportedAt: new Date().toISOString(),
+        attendance: rows,
+        summary: {
+          present: presentCount,
+          absent: students.length - presentCount,
+          total: students.length,
+          attendanceRate,
+        },
+      };
+      downloadFile(
+        JSON.stringify(payload, null, 2),
+        `${filename}.json`,
+        "application/json"
+      );
+    }
+
+    toast.success(`Attendance exported as ${exportFormat.toUpperCase()}`);
   };
 
   const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
@@ -277,6 +496,7 @@ const CourseDetail = () => {
             {students.length} {students.length === 1 ? "student" : "students"}
           </span>
           <button
+            type="button"
             onClick={copyRegistrationLink}
             className="flex items-center gap-1.5 hover:text-foreground transition-colors"
           >
@@ -376,15 +596,46 @@ const CourseDetail = () => {
                                 )}
                               </div>
                             </div>
-                            <Badge
-                              variant={
-                                session.presentCount > 0 ? "default" : "secondary"
-                              }
-                              className="w-fit"
-                            >
-                              <UserCheck className="h-3 w-3 mr-1" />
-                              {session.presentCount} / {session.totalStudents} present
-                            </Badge>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <Badge
+                                variant={
+                                  session.presentCount > 0 ? "default" : "secondary"
+                                }
+                              >
+                                <UserCheck className="h-3 w-3 mr-1" />
+                                {session.presentCount} / {session.totalStudents} present
+                              </Badge>
+
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    disabled={exportingSessionId === session.id}
+                                  >
+                                    {exportingSessionId === session.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Download className="h-3 w-3" />
+                                    )}
+                                    <ChevronDown className="h-3 w-3 ml-1" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    onClick={() => handleExportSession(session, "csv")}
+                                  >
+                                    Export as CSV
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleExportSession(session, "json")}
+                                  >
+                                    Export as JSON
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -529,6 +780,33 @@ const CourseDetail = () => {
                       {presentCount} / {students.length}
                     </Badge>
                   </div>
+
+                  <Separator />
+
+                  {/* Export the live attendance list mid-session or snapshot for records */}
+                  {activeSession && students.length > 0 && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="w-full text-xs">
+                          <Download className="h-3.5 w-3.5 mr-2" />
+                          Export Attendance
+                          <ChevronDown className="h-3.5 w-3.5 ml-auto" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem
+                          onClick={() => handleExportSession(activeSession, "csv")}
+                        >
+                          Export as CSV
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleExportSession(activeSession, "json")}
+                        >
+                          Export as JSON
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
 
                   <Separator />
 

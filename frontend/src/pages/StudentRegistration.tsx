@@ -1,3 +1,43 @@
+// =============================================================================
+// PAGE: /register/:token  — Public student self-registration
+// =============================================================================
+// What this page does:
+//   - Resolves the registration token in the URL to a course
+//       GET /attendance/register/:token  → returns the Course object
+//     This is a PUBLIC endpoint — no authentication required. Students open
+//     a link shared by their lecturer and land here directly.
+//   - Shows a form where the student enters their matric number and uploads
+//     a passport-style photo of their face.
+//   - On submit, sends the form to:
+//       POST /attendance/courses/:courseId/register  (multipart/form-data)
+//       Fields: matricNumber (string), photo (File — JPEG or PNG)
+//   - Shows a success screen once the backend confirms registration.
+//
+// TOKEN vs COURSE ID:
+//   The URL contains the `registrationToken` (a UUID), NOT the courseId.
+//   This is intentional — tokens are random and unguessable, unlike sequential IDs.
+//   The backend needs TWO endpoints:
+//     1. GET /attendance/register/:token
+//        Looks up the course by registrationToken, returns the Course object.
+//        Used here to show the course name before the student submits.
+//        Return 404 if the token doesn't match any course.
+//     2. POST /attendance/courses/:courseId/register  (already documented in api.ts)
+//        The actual registration submission. courseId comes from the Course
+//        object returned by step 1.
+//
+// PHOTO STORAGE:
+//   The backend should store the uploaded photo in Cloudinary (same approach as
+//   classroom images) and save the secure_url as the student's `photoUrl`.
+//   Optionally, compute a face embedding from the photo at registration time and
+//   cache it — this speeds up facial recognition during live sessions.
+//
+// ERROR STATES:
+//   - Invalid/unknown token → "Link not found" screen
+//   - Duplicate matric number for same course → show the backend's error message
+//     (backend should return 409 with { detail: "Already registered" })
+//   - Network/server error → inline error alert, form stays visible for retry
+// =============================================================================
+
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -224,6 +264,7 @@ const StudentRegistration = () => {
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   className="hidden"
+                  aria-label="Upload passport photograph"
                   onChange={handlePhotoChange}
                 />
               </div>
