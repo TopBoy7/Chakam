@@ -20,7 +20,6 @@ const Navigation = () => {
   const links = [
     { to: "/", label: "Home" },
     { to: "/dashboard", label: "Dashboard" },
-    { to: "/analytics", label: "Analytics" },
     { to: "/attendance", label: "Attendance" },
     { to: "/my-attendance", label: "My Attendance" },
   ];
