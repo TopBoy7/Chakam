@@ -291,8 +291,8 @@ const Home = () => {
           <nav className="flex flex-wrap gap-6">
             {[
               { label: "Dashboard", to: "/dashboard" },
-              { label: "Analytics", to: "/analytics" },
               { label: "Attendance", to: "/attendance" },
+              { label: "My Attendance", to: "/my-attendance" },
             ].map((l) => (
               <Link
                 key={l.to}
