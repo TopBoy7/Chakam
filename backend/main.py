@@ -264,12 +264,15 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
 
     now_ng = datetime.now(ZoneInfo("Africa/Lagos"))
     timestamp = now_ng.strftime("%d %b %Y, %I:%M %p").replace(" 0", " ")
+    # Annotation color: matches the frontend background hsl(38 38% 94%) = RGB(246,241,234) = BGR(234,241,246)
+    ANNOTATION_COLOR = (234, 241, 246)
+
     # Overlay text: occupancy / capacity
     label = f"Occupancy: {new_occupancy}/{classroom.capacity}"
-    cv2.putText(img, label, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+    cv2.putText(img, label, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, ANNOTATION_COLOR, 3)
 
     # Overlay timestamp
-    cv2.putText(img, timestamp, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+    cv2.putText(img, timestamp, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, ANNOTATION_COLOR, 2)
 
     # Encode annotated image to bytes
     _, encoded = cv2.imencode(".jpg", img)

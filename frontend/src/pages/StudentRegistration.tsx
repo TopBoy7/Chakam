@@ -3,29 +3,73 @@
 // =============================================================================
 // Flow:
 //   1. Resolve token → course via GET /attendance/register/:token  (public)
-//   2. Student reads the consent form and checks the biometric consent checkbox
-//      (required by NDPA Section 30 — biometric data is sensitive personal data)
-//   3. Student enters matric number and uploads UP TO 5 passport photos
+//   2. Student reads the privacy notice, checks BOTH consent checkboxes
+//   3. Student enters matric number and uploads passport photo(s)
 //   4. Submit → POST /attendance/courses/:courseId/register  (multipart/form-data)
-//        Fields: matricNumber (string), photos (File[] — up to 5 JPEG/PNG images),
-//                biometricConsent (string "true") — store this flag with the record
+//        Fields:
+//          matricNumber       (string)
+//          photos             (File[] — up to 5 JPEG/PNG)
+//          biometricConsent   ("true")
+//          manualAltConsent   ("true")
 //
-// BACKEND NOTE for /register endpoint:
-//   - Accept `photos` as a multi-file field — iterate request.files.getlist("photos")
-//   - Store `biometricConsent: true` and `consentTimestamp: now()` on the student record
-//     (NDPA requires an audit trail of when consent was given)
-//   - Upload each photo to Cloudinary, store all URLs in an array field (photoUrls[])
-//   - Compute face embeddings for EACH photo and store them all
-//   - Still enforce duplicate matricNumber per course → 409 Conflict
+// =============================================================================
+// BACKEND ENFORCEMENT — POST /attendance/courses/:courseId/register
+// =============================================================================
+// The frontend collects consent. The backend must PROVE and ENFORCE it.
+// Do not trust the UI — treat every request as potentially tampered.
 //
-// BACKEND NOTE for DELETE /attendance/courses/:courseId/students/biometrics:
-//   - Body: { matricNumber: string }
-//   - Delete all stored photos from Cloudinary (all photoUrls)
-//   - Delete all face embeddings for this student in this course
-//   - Set photosDeleted: true, embeddingsDeleted: true, consentWithdrawnAt: now()
-//     on the student record (keep the record itself for audit — do NOT hard-delete)
-//   - Attendance records (past sessions) must be preserved — only biometrics are removed
-//   - Return 204 No Content
+// STEP 1 — CONSENT GATE (reject before touching any data):
+//   if request.form.get("biometricConsent") != "true":
+//       raise HTTPException(422, "Biometric consent is required")
+//   if request.form.get("manualAltConsent") != "true":
+//       raise HTTPException(422, "Manual alternative acknowledgment is required")
+//
+// STEP 2 — DUPLICATE CHECK:
+//   Reject if matricNumber already registered for this courseId → 409 Conflict
+//
+// STEP 3 — PHOTO PROCESSING (DATA MINIMISATION — NDPA s.24):
+//   *** DO NOT upload photos to Cloudinary or save them anywhere ***
+//   For each uploaded photo:
+//     a. Read into memory (bytes / numpy array)
+//     b. Run face_recognition.face_encodings() → extract 128-float vector
+//     c. If no face detected → return 422 "No face detected in photo N"
+//     d. Discard the image bytes immediately — never written to disk or cloud
+//   Store ONLY the embedding vector(s) in MongoDB
+//
+// STEP 4 — STORE CONSENT AUDIT RECORD:
+//   On the student document store:
+//     {
+//       matricNumber:       str   (uppercase),
+//       courseId:           str,
+//       embeddings:         List[List[float]],   # one per photo, 128 floats each
+//       biometricConsent:   True,
+//       manualAltConsent:   True,
+//       consentTimestamp:   datetime.utcnow(),   # NDPA audit trail
+//       consentVersion:     "1.0",               # bump when notice text changes
+//       registeredAt:       datetime.utcnow(),
+//     }
+//   No photoUrls field. No Cloudinary reference. Photos are gone.
+//
+// STEP 5 — RESPONSE:
+//   Return 201 Created: { data: { student: { matricNumber, courseId, registeredAt } } }
+//   Do not echo back embeddings.
+//
+// =============================================================================
+// BACKEND ENFORCEMENT — DELETE /attendance/courses/:courseId/students/biometrics
+// =============================================================================
+//   Body: { matricNumber: string }
+//
+//   The student has the right to erasure under NDPA s.36. This must be instant.
+//
+//   1. Find student by (courseId, matricNumber). Return 404 if not found.
+//   2. Delete all stored embeddings for this student (set embeddings: []).
+//   3. Update the document:
+//        embeddingsDeleted:    True
+//        consentWithdrawnAt:   datetime.utcnow()
+//      Do NOT hard-delete the document — preserve the audit trail.
+//   4. Past AttendanceRecord documents are NOT touched — historical marks are kept.
+//   5. After this, the recognition pipeline must skip this student (check embeddingsDeleted flag).
+//   6. Return 204 No Content.
 // =============================================================================
 
 import { useEffect, useState, useRef } from "react";
@@ -51,6 +95,7 @@ const StudentRegistration = () => {
   const [courseError, setCourseError] = useState<string | null>(null);
 
   const [biometricConsent, setBiometricConsent] = useState(false);
+  const [manualAltConsent, setManualAltConsent] = useState(false);
   const [matricNumber, setMatricNumber]         = useState("");
   const [photoFiles, setPhotoFiles]             = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews]       = useState<string[]>([]);
@@ -110,13 +155,14 @@ const StudentRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent) return;
+    if (!course || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const formData = new FormData();
       formData.append("matricNumber", matricNumber.trim().toUpperCase());
       formData.append("biometricConsent", "true");
+      formData.append("manualAltConsent", "true");
       for (const file of photoFiles) {
         formData.append("photos", file);
       }
@@ -229,9 +275,20 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">What we collect</p>
               <p className="text-xs leading-relaxed">
-                Up to 5 passport-style photos of your face. From these, a mathematical
-                representation (face embedding) is computed. Both the photos and the
-                embedding are stored in encrypted cloud storage (Cloudinary).
+                Your photo is processed <strong className="text-foreground">in memory only</strong> to extract
+                a 128-number mathematical vector (face embedding). The photo is{" "}
+                <strong className="text-foreground">immediately deleted</strong> after extraction — it is never
+                saved to disk, cloud storage, or any database. Only the numerical vector is stored.
+                It cannot be reversed back into a face image.
+              </p>
+            </div>
+
+            {/* What is stored */}
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-widest text-foreground">What is stored</p>
+              <p className="text-xs leading-relaxed">
+                Your matric number, your face embedding (128 numbers, AES-256 encrypted), and
+                a record that you gave consent with the exact date and time. Nothing else.
               </p>
             </div>
 
@@ -239,10 +296,20 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">How it's used</p>
               <p className="text-xs leading-relaxed">
-                Your face embedding is compared against a photo captured in the classroom when
-                your lecturer triggers attendance. It is used <strong className="text-foreground">only</strong> for
-                verifying your presence in <strong className="text-foreground">{course.courseName}</strong>. It is
-                not shared with third parties and not used for any other purpose.
+                During class, the camera sends a snapshot to the server. The system compares
+                detected faces against stored embeddings <strong className="text-foreground">in memory</strong> — the
+                snapshot is not saved. Your embedding is used <strong className="text-foreground">only</strong> for
+                attendance in <strong className="text-foreground">{course.courseName}</strong>. It is
+                not shared with any third party.
+              </p>
+            </div>
+
+            {/* Who can access */}
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-widest text-foreground">Who can access</p>
+              <p className="text-xs leading-relaxed">
+                Only the course lecturer can view attendance results. Your lecturer reviews and
+                can override every automated mark before it affects your record (NDPA s.37).
               </p>
             </div>
 
@@ -250,21 +317,21 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">Retention</p>
               <p className="text-xs leading-relaxed">
-                Your photos and embedding are retained for the duration of the course or until
-                you withdraw consent, whichever comes first.
+                Your embedding is deleted at the end of the academic session, or immediately
+                upon your request — whichever comes first.
               </p>
             </div>
 
             {/* Your rights */}
             <div className="space-y-1">
-              <p className="text-xs font-medium uppercase tracking-widest text-foreground">Your rights</p>
+              <p className="text-xs font-medium uppercase tracking-widest text-foreground">Your rights (NDPA 2023)</p>
               <p className="text-xs leading-relaxed">
-                You may <strong className="text-foreground">withdraw consent and delete your biometric data at
-                any time</strong> from the{" "}
+                You have the right to access your data (s.34), correct it (s.35), erase it (s.36),
+                and object to processing (s.38). To delete your embedding, visit the{" "}
                 <a href="/my-attendance" className="underline underline-offset-2 hover:text-foreground transition-colors">
                   My Attendance
                 </a>{" "}
-                page. Deleting your data does not affect past attendance records.
+                page. Deletion is immediate and does not affect past attendance records.
               </p>
             </div>
 
@@ -272,24 +339,21 @@ const StudentRegistration = () => {
             <div className="rounded-lg bg-foreground/[0.04] border border-border px-4 py-3 flex gap-3">
               <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed">
-                <strong className="text-foreground">No consent? No problem.</strong> If you do not
-                wish to provide biometric data, you do not need to register here.
-                Your lecturer will record your attendance manually each class.
+                <strong className="text-foreground">No consent? No problem.</strong> You do not need
+                to register here. Your lecturer will record your attendance manually.{" "}
+                <strong className="text-foreground">There is no academic penalty for opting out.</strong>
               </p>
             </div>
 
-            {/* Consent checkbox */}
-            <label className="flex items-start gap-3 cursor-pointer group pt-1">
+            {/* Checkbox 1 — Biometric consent (NDPA s.26 + s.30(1)(a)) */}
+            <label className="flex items-start gap-3 cursor-pointer pt-1">
               <div className="relative mt-0.5 shrink-0">
                 <input
                   type="checkbox"
                   checked={biometricConsent}
                   onChange={(e) => {
                     setBiometricConsent(e.target.checked);
-                    if (!e.target.checked) {
-                      setPhotoFiles([]);
-                      setPhotoPreviews([]);
-                    }
+                    if (!e.target.checked) { setPhotoFiles([]); setPhotoPreviews([]); }
                   }}
                   className="peer sr-only"
                 />
@@ -302,23 +366,46 @@ const StudentRegistration = () => {
                 </div>
               </div>
               <span className="text-xs leading-relaxed text-foreground">
-                I have read and understood the above. I <strong>explicitly consent</strong> to
-                the collection and processing of my biometric (facial) data for automated
-                attendance in <strong>{course.courseCode} — {course.courseName}</strong>, in
-                accordance with NDPA Section 30.
+                I understand that my photograph will be used to create a facial recognition
+                template for automated attendance in{" "}
+                <strong>{course.courseCode}</strong>. The photo will be deleted immediately
+                after processing. I can withdraw from this system at any time.
+              </span>
+            </label>
+
+            {/* Checkbox 2 — Manual alternative acknowledgment (NDPA s.26 freely given) */}
+            <label className="flex items-start gap-3 cursor-pointer">
+              <div className="relative mt-0.5 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={manualAltConsent}
+                  onChange={(e) => setManualAltConsent(e.target.checked)}
+                  className="peer sr-only"
+                />
+                <div className="h-4 w-4 rounded border border-border bg-background peer-checked:bg-foreground peer-checked:border-foreground transition-colors flex items-center justify-center">
+                  {manualAltConsent && (
+                    <svg className="h-2.5 w-2.5 text-background" viewBox="0 0 10 10" fill="none">
+                      <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <span className="text-xs leading-relaxed text-foreground">
+                I understand that a manual attendance alternative is available and that
+                choosing not to register carries <strong>no academic penalty</strong>.
               </span>
             </label>
           </CardContent>
         </Card>
 
         {/* ── Registration Form (only active after consent) ── */}
-        <Card className={!biometricConsent ? "opacity-50 pointer-events-none select-none" : ""}>
+        <Card className={(!biometricConsent || !manualAltConsent) ? "opacity-50 pointer-events-none select-none" : ""}>
           <CardHeader className="pb-4">
             <CardTitle className="font-serif text-lg font-normal">Register for attendance tracking</CardTitle>
             <CardDescription className="text-sm">
-              {biometricConsent
+              {biometricConsent && manualAltConsent
                 ? "Upload clear, front-facing photos. You only need to do this once."
-                : "Check the consent box above to continue."}
+                : "Check both boxes above to continue."}
             </CardDescription>
           </CardHeader>
 
@@ -419,7 +506,7 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent}
+                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent}
               >
                 {submitting ? (
                   <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>

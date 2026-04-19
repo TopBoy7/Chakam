@@ -254,30 +254,53 @@ export const api = {
       /**
        * POST /attendance/courses/:courseId/register
        *
-       * Student self-registration endpoint. Accepts multipart/form-data.
-       * This is the endpoint hit by the public StudentRegistration page
-       * (no authentication required — it is intentionally public).
+       * Student self-registration. Accepts multipart/form-data.
+       * Public endpoint — no auth token required.
        *
        * Request body (multipart/form-data):
-       *   matricNumber: string   — uppercased by the frontend before sending
-       *   photo: File            — JPEG or PNG, passport-style face photo
+       *   matricNumber     string   uppercased by the frontend
+       *   photos           File[]   up to 5 JPEG/PNG images (multi-file field)
+       *   biometricConsent string   must equal "true"
+       *   manualAltConsent string   must equal "true"
        *
-       * Backend must:
-       *   1. Validate that `courseId` exists.
-       *   2. Reject duplicate `matricNumber` registrations for the same course
-       *      (return 409 Conflict with { detail: "Already registered" }).
-       *   3. Upload the photo to Cloudinary (same pattern as classroom images),
-       *      store the `secure_url` as `photoUrl`.
-       *   4. Optionally pre-compute and cache a face embedding from the photo
-       *      at registration time so recognition is faster during sessions.
+       * ── CONSENT GATE (check FIRST, before touching any data) ──────────────
+       *   if form.get("biometricConsent") != "true":
+       *       raise HTTPException(422, "Biometric consent is required")
+       *   if form.get("manualAltConsent") != "true":
+       *       raise HTTPException(422, "Manual alternative acknowledgment is required")
+       *   Never rely on the frontend to have already validated this.
        *
-       * Response shape:
-       *   { data: { student: RegisteredStudent } }
-       *   OR simply { data: null } — the frontend only checks for success/failure.
+       * ── DUPLICATE CHECK ───────────────────────────────────────────────────
+       *   Reject duplicate matricNumber for the same courseId → 409 Conflict.
        *
-       * NOTE: The `courseId` here is the MongoDB _id of the course, NOT the
-       * registrationToken. The token is resolved to a courseId by the separate
-       * GET /attendance/register/:token endpoint (see StudentRegistration.tsx).
+       * ── PHOTO PROCESSING — DATA MINIMISATION (NDPA s.24) ─────────────────
+       *   *** DO NOT save photos to disk, Cloudinary, or any storage ***
+       *   For each uploaded photo file:
+       *     1. Read bytes into memory as a numpy array
+       *     2. Run face_recognition.face_encodings() → 128-float vector
+       *     3. If no face detected → return 422 "No face detected in photo N"
+       *     4. Discard the image bytes — they must not persist anywhere
+       *
+       * ── STORE IN MONGODB ──────────────────────────────────────────────────
+       *   {
+       *     matricNumber:       str (uppercase),
+       *     courseId:           str,
+       *     embeddings:         List[List[float]],  # one per photo, 128 floats
+       *     biometricConsent:   True,
+       *     manualAltConsent:   True,
+       *     consentTimestamp:   datetime.utcnow(),  # NDPA audit trail
+       *     consentVersion:     "1.0",
+       *     registeredAt:       datetime.utcnow(),
+       *     embeddingsDeleted:  False,
+       *   }
+       *   No photoUrls field. No Cloudinary reference. Photos are gone.
+       *
+       * ── RESPONSE ──────────────────────────────────────────────────────────
+       *   201 Created: { data: { student: { matricNumber, courseId, registeredAt } } }
+       *   Do NOT echo back embeddings.
+       *
+       * NOTE: courseId is the MongoDB _id of the course, NOT the registrationToken.
+       * The token → courseId resolution happens at GET /attendance/register/:token.
        */
       /**
        * DELETE /attendance/courses/:courseId/students/biometrics
