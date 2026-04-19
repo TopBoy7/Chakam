@@ -279,6 +279,46 @@ export const api = {
        * registrationToken. The token is resolved to a courseId by the separate
        * GET /attendance/register/:token endpoint (see StudentRegistration.tsx).
        */
+      /**
+       * DELETE /attendance/courses/:courseId/students/biometrics
+       *
+       * Allows a student to withdraw biometric consent and delete their stored
+       * photos and face embeddings, as required by NDPA Section 30.
+       *
+       * Request body (JSON):
+       *   { matricNumber: string }
+       *
+       * Backend must:
+       *   1. Find RegisteredStudent by (courseId, matricNumber).
+       *   2. Delete all photos from Cloudinary (iterate photoUrls array).
+       *   3. Delete all stored face embeddings for this student in this course.
+       *   4. Update the student record:
+       *        photosDeleted: true
+       *        embeddingsDeleted: true
+       *        consentWithdrawnAt: now()
+       *      Do NOT hard-delete the student document — preserve the audit trail
+       *      and keep past AttendanceRecord documents intact.
+       *   5. Return 204 No Content.
+       *   6. Return 404 if the student is not found.
+       *
+       * After deletion the student cannot be auto-detected; future attendance
+       * must be recorded manually by the lecturer.
+       */
+      deleteBiometrics: async (courseId: string, matricNumber: string): Promise<void> => {
+        const res = await fetch(
+          `${API_BASE}/attendance/courses/${courseId}/students/biometrics`,
+          {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matricNumber: matricNumber.trim().toUpperCase() }),
+          }
+        );
+        if (!res.ok) {
+          const d = await res.json();
+          throw new Error(d?.detail || 'Failed to delete biometric data');
+        }
+      },
+
       register: async (courseId: string, formData: FormData): Promise<void> => {
         const res = await fetch(`${API_BASE}/attendance/courses/${courseId}/register`, {
           method: 'POST',

@@ -43,7 +43,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { AlertCircle, ChevronDown, ChevronRight, Search, Trash2 } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { api } from "@/lib/api";
 import type { StudentAttendanceSummary } from "@/types/attendance";
@@ -67,12 +72,18 @@ function fmt(dateStr: string): string {
 }
 
 const StudentPortal = () => {
-  const [matric, setMatric]       = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [results, setResults]     = useState<StudentAttendanceSummary[] | null>(null);
-  const [expanded, setExpanded]   = useState<Record<string, boolean>>({});
+  const [matric, setMatric]           = useState("");
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const [results, setResults]         = useState<StudentAttendanceSummary[] | null>(null);
+  const [expanded, setExpanded]       = useState<Record<string, boolean>>({});
   const [courseQuery, setCourseQuery] = useState("");
+
+  // Biometric deletion state
+  const [deleteTarget, setDeleteTarget]     = useState<StudentAttendanceSummary | null>(null);
+  const [deleting, setDeleting]             = useState(false);
+  const [deleteError, setDeleteError]       = useState<string | null>(null);
+  const [deletedCourses, setDeletedCourses] = useState<Set<string>>(new Set());
 
   const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,6 +105,21 @@ const StudentPortal = () => {
 
   const toggle = (courseId: string) =>
     setExpanded((prev) => ({ ...prev, [courseId]: !prev[courseId] }));
+
+  const handleDeleteBiometrics = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.attendance.students.deleteBiometrics(deleteTarget.courseId, matric);
+      setDeletedCourses((prev) => new Set(prev).add(deleteTarget.courseId));
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete biometric data.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -248,6 +274,29 @@ const StudentPortal = () => {
                           </div>
                         ))
                       )}
+
+                      {/* Biometric data deletion */}
+                      <div className="px-5 py-4">
+                        {deletedCourses.has(course.courseId) ? (
+                          <p className="text-xs text-success">
+                            Biometric data deleted. Future attendance will be recorded manually.
+                          </p>
+                        ) : (
+                          <div className="flex items-center justify-between gap-4">
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              Under NDPA Section 30, you may delete your facial photos and embeddings at any time.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => { setDeleteError(null); setDeleteTarget(course); }}
+                              className="shrink-0 flex items-center gap-1.5 text-xs text-destructive hover:text-destructive/80 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete my data
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -262,6 +311,51 @@ const StudentPortal = () => {
           );
         })()}
       </main>
+
+      {/* Biometric deletion confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent className="bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-serif text-xl font-normal">
+              Delete biometric data?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground space-y-2">
+              <span className="block">
+                This will permanently delete your stored photos and face embeddings for{" "}
+                <strong className="text-foreground">{deleteTarget?.courseCode} — {deleteTarget?.courseName}</strong>.
+              </span>
+              <span className="block">
+                Your past attendance records are not affected. However, the camera will no longer
+                be able to detect you automatically — your lecturer will record your attendance manually going forward.
+              </span>
+              <span className="block font-medium text-foreground">This action cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {deleteError && (
+            <Alert variant="destructive" className="mt-2">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleting}
+              className="border-border text-xs tracking-widest uppercase rounded-full"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteBiometrics}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground text-xs tracking-widest uppercase rounded-full hover:bg-destructive/90"
+            >
+              {deleting ? "Deleting…" : "Delete My Data"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
