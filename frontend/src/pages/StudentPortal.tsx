@@ -48,7 +48,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { AlertCircle, ChevronDown, ChevronRight, Search, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, Search, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { api } from "@/lib/api";
 import type { StudentAttendanceSummary } from "@/types/attendance";
@@ -275,16 +275,45 @@ const StudentPortal = () => {
                         ))
                       )}
 
+                      {/* Consent record — NDPA s.34 right of access */}
+                      <div className="px-5 py-4 space-y-1">
+                        <p className="text-xs font-medium uppercase tracking-widest text-foreground mb-2">Your Consent Record</p>
+                        {course.consent ? (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              {course.consent.biometricsActive
+                                ? <ShieldCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                                : <ShieldOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              }
+                              <span className="text-xs text-foreground">
+                                Biometric data:{" "}
+                                <strong>{course.consent.biometricsActive ? "Active" : "Deleted"}</strong>
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground pl-5">
+                              Consent given: {fmt(course.consent.consentGivenAt)} · Version {course.consent.consentVersion}
+                            </p>
+                            {course.consent.consentWithdrawnAt && (
+                              <p className="text-xs text-muted-foreground pl-5">
+                                Withdrawn: {fmt(course.consent.consentWithdrawnAt)}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">Consent record unavailable.</p>
+                        )}
+                      </div>
+
                       {/* Biometric data deletion */}
                       <div className="px-5 py-4">
-                        {deletedCourses.has(course.courseId) ? (
-                          <p className="text-xs text-success">
-                            Biometric data deleted. Future attendance will be recorded manually.
+                        {deletedCourses.has(course.courseId) || course.consent?.biometricsActive === false ? (
+                          <p className="text-xs text-muted-foreground">
+                            Biometric data has been deleted. Future attendance will be recorded manually.
                           </p>
                         ) : (
                           <div className="flex items-center justify-between gap-4">
                             <p className="text-xs text-muted-foreground leading-relaxed">
-                              Under NDPA Section 30, you may delete your facial photos and embeddings at any time.
+                              Under NDPA s.36, you may delete your face embedding at any time.
                             </p>
                             <button
                               type="button"

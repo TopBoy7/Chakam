@@ -11,6 +11,7 @@
 //          photos             (File[] — up to 5 JPEG/PNG)
 //          biometricConsent   ("true")
 //          manualAltConsent   ("true")
+//          ageConsent         ("true")
 //
 // =============================================================================
 // BACKEND ENFORCEMENT — POST /attendance/courses/:courseId/register
@@ -23,6 +24,8 @@
 //       raise HTTPException(422, "Biometric consent is required")
 //   if request.form.get("manualAltConsent") != "true":
 //       raise HTTPException(422, "Manual alternative acknowledgment is required")
+//   if request.form.get("ageConsent") != "true":
+//       raise HTTPException(422, "Age declaration is required")
 //
 // STEP 2 — DUPLICATE CHECK:
 //   Reject if matricNumber already registered for this courseId → 409 Conflict
@@ -96,6 +99,7 @@ const StudentRegistration = () => {
 
   const [biometricConsent, setBiometricConsent] = useState(false);
   const [manualAltConsent, setManualAltConsent] = useState(false);
+  const [ageConsent, setAgeConsent]             = useState(false);
   const [matricNumber, setMatricNumber]         = useState("");
   const [photoFiles, setPhotoFiles]             = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews]       = useState<string[]>([]);
@@ -155,7 +159,7 @@ const StudentRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent) return;
+    if (!course || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -163,6 +167,7 @@ const StudentRegistration = () => {
       formData.append("matricNumber", matricNumber.trim().toUpperCase());
       formData.append("biometricConsent", "true");
       formData.append("manualAltConsent", "true");
+      formData.append("ageConsent", "true");
       for (const file of photoFiles) {
         formData.append("photos", file);
       }
@@ -395,17 +400,40 @@ const StudentRegistration = () => {
                 choosing not to register carries <strong>no academic penalty</strong>.
               </span>
             </label>
+
+            {/* Checkbox 3 — Age declaration (NDPA s.31 — parental consent required for under-18) */}
+            <label className="flex items-start gap-3 cursor-pointer">
+              <div className="relative mt-0.5 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={ageConsent}
+                  onChange={(e) => setAgeConsent(e.target.checked)}
+                  className="peer sr-only"
+                />
+                <div className="h-4 w-4 rounded border border-border bg-background peer-checked:bg-foreground peer-checked:border-foreground transition-colors flex items-center justify-center">
+                  {ageConsent && (
+                    <svg className="h-2.5 w-2.5 text-background" viewBox="0 0 10 10" fill="none">
+                      <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <span className="text-xs leading-relaxed text-foreground">
+                I confirm I am <strong>18 years of age or older</strong>, or I have obtained
+                parental/guardian consent to register (required under NDPA Section 31).
+              </span>
+            </label>
           </CardContent>
         </Card>
 
         {/* ── Registration Form (only active after consent) ── */}
-        <Card className={(!biometricConsent || !manualAltConsent) ? "opacity-50 pointer-events-none select-none" : ""}>
+        <Card className={(!biometricConsent || !manualAltConsent || !ageConsent) ? "opacity-50 pointer-events-none select-none" : ""}>
           <CardHeader className="pb-4">
             <CardTitle className="font-serif text-lg font-normal">Register for attendance tracking</CardTitle>
             <CardDescription className="text-sm">
-              {biometricConsent && manualAltConsent
+              {biometricConsent && manualAltConsent && ageConsent
                 ? "Upload clear, front-facing photos. You only need to do this once."
-                : "Check both boxes above to continue."}
+                : "Check all three boxes above to continue."}
             </CardDescription>
           </CardHeader>
 
@@ -506,7 +534,7 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent}
+                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
               >
                 {submitting ? (
                   <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>

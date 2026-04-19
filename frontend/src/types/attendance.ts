@@ -16,9 +16,9 @@ export interface Course {
 export interface RegisteredStudent {
   id: string;
   matricNumber: string;
-  photoUrl?: string;
   courseId: string;
   registeredAt: string;
+  // No photoUrl — photos are never stored (processed in memory only, NDPA s.24)
 }
 
 export interface Session {
@@ -64,6 +64,22 @@ export interface StudentSessionRecord {
   manuallyOverridden: boolean;
 }
 
+// Consent record returned alongside attendance so the student can verify
+// what they agreed to and when (NDPA s.34 — right of access).
+//
+// BACKEND: include this on every StudentAttendanceSummary entry.
+// Source fields from the RegisteredStudent document in MongoDB:
+//   consentTimestamp    → consentGivenAt
+//   consentVersion      → consentVersion
+//   embeddingsDeleted   → biometricsActive (invert the flag)
+//   consentWithdrawnAt  → consentWithdrawnAt (omit if still active)
+export interface ConsentRecord {
+  consentGivenAt: string;            // ISO 8601 — when all three boxes were checked
+  consentVersion: string;            // e.g. "1.0" — bump when notice text changes
+  biometricsActive: boolean;         // false once student has deleted their embedding
+  consentWithdrawnAt?: string;       // ISO 8601 — set when student deletes their data
+}
+
 export interface StudentAttendanceSummary {
   courseId: string;
   courseCode: string;
@@ -72,4 +88,5 @@ export interface StudentAttendanceSummary {
   totalSessions: number;              // all ended sessions for this course
   attendanceRate: number;             // 0–100, computed by backend
   sessions: StudentSessionRecord[];
+  consent: ConsentRecord;             // NDPA s.34 — always included
 }

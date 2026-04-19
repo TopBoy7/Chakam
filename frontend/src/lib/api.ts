@@ -241,8 +241,8 @@ export const api = {
        * Response shape:
        *   { data: { students: RegisteredStudent[] } }
        *
-       * `photoUrl` should be a publicly accessible URL (e.g. Cloudinary secure_url).
-       * The frontend displays it as a small circular avatar next to the matric number.
+       * Do NOT include photoUrl — photos are never stored (NDPA s.24 data minimisation).
+       * Return only: id, matricNumber, courseId, registeredAt.
        */
       list: async (courseId: string): Promise<RegisteredStudent[]> => {
         const res = await fetch(`${API_BASE}/attendance/courses/${courseId}/students`);
@@ -262,12 +262,15 @@ export const api = {
        *   photos           File[]   up to 5 JPEG/PNG images (multi-file field)
        *   biometricConsent string   must equal "true"
        *   manualAltConsent string   must equal "true"
+       *   ageConsent       string   must equal "true"  (NDPA s.31 — under-18 requires parental consent)
        *
        * ── CONSENT GATE (check FIRST, before touching any data) ──────────────
        *   if form.get("biometricConsent") != "true":
        *       raise HTTPException(422, "Biometric consent is required")
        *   if form.get("manualAltConsent") != "true":
        *       raise HTTPException(422, "Manual alternative acknowledgment is required")
+       *   if form.get("ageConsent") != "true":
+       *       raise HTTPException(422, "Age declaration is required")
        *   Never rely on the frontend to have already validated this.
        *
        * ── DUPLICATE CHECK ───────────────────────────────────────────────────
@@ -288,6 +291,7 @@ export const api = {
        *     embeddings:         List[List[float]],  # one per photo, 128 floats
        *     biometricConsent:   True,
        *     manualAltConsent:   True,
+       *     ageConsent:         True,
        *     consentTimestamp:   datetime.utcnow(),  # NDPA audit trail
        *     consentVersion:     "1.0",
        *     registeredAt:       datetime.utcnow(),
@@ -305,27 +309,24 @@ export const api = {
       /**
        * DELETE /attendance/courses/:courseId/students/biometrics
        *
-       * Allows a student to withdraw biometric consent and delete their stored
-       * photos and face embeddings, as required by NDPA Section 30.
+       * Student right to erasure — NDPA s.36. Must be instant and irreversible.
        *
        * Request body (JSON):
        *   { matricNumber: string }
        *
        * Backend must:
-       *   1. Find RegisteredStudent by (courseId, matricNumber).
-       *   2. Delete all photos from Cloudinary (iterate photoUrls array).
-       *   3. Delete all stored face embeddings for this student in this course.
-       *   4. Update the student record:
-       *        photosDeleted: true
-       *        embeddingsDeleted: true
-       *        consentWithdrawnAt: now()
-       *      Do NOT hard-delete the student document — preserve the audit trail
-       *      and keep past AttendanceRecord documents intact.
-       *   5. Return 204 No Content.
-       *   6. Return 404 if the student is not found.
-       *
-       * After deletion the student cannot be auto-detected; future attendance
-       * must be recorded manually by the lecturer.
+       *   1. Find RegisteredStudent by (courseId, matricNumber). Return 404 if not found.
+       *   2. Set embeddings: [] on the student document (wipe all 128-float vectors).
+       *      There are no photos to delete — photos were never stored (see register endpoint).
+       *   3. Update the document:
+       *        embeddingsDeleted:    True
+       *        consentWithdrawnAt:   datetime.utcnow()
+       *      Do NOT hard-delete the document — the audit trail (consentTimestamp,
+       *      consentWithdrawnAt) must be preserved for NDPA accountability.
+       *   4. Past AttendanceRecord documents are NOT touched — historical marks are kept.
+       *   5. Ensure the recognition pipeline skips this student by checking
+       *      embeddingsDeleted == True before any face comparison.
+       *   6. Return 204 No Content.
        */
       deleteBiometrics: async (courseId: string, matricNumber: string): Promise<void> => {
         const res = await fetch(
@@ -569,8 +570,7 @@ export const api = {
       /**
        * GET /attendance/students/lookup/:matricNumber
        *
-       * Public endpoint — no authentication required. Used by the /my-attendance
-       * page where a student checks their own attendance history by matric number.
+       * Public endpoint — no auth required. Used by /my-attendance.
        *
        * Backend must:
        *   1. Find all RegisteredStudent documents where matricNumber matches
@@ -578,18 +578,23 @@ export const api = {
        *   2. For each course, find all ended Session documents.
        *   3. For each session, find the AttendanceRecord for this student (if any).
        *      Students with no record for a session count as absent.
-       *   4. Compute attendanceRate = (presentCount / totalSessions) * 100 per course.
-       *   5. Return aggregated results grouped by course.
+       *   4. Compute attendanceRate = presentCount / totalSessions (0–1 float).
+       *   5. Include the consent record from the RegisteredStudent document
+       *      so the student can exercise their right of access (NDPA s.34).
        *
        * Response shape:
        *   { data: { results: StudentAttendanceSummary[] } }
        *
-       * Return 404 with { detail: "No student found with this matric number" }
-       *   if the matric number does not exist in any course.
+       *   Each result must include a `consent` object:
+       *   {
+       *     consentGivenAt:      str   (ISO 8601 — from consentTimestamp field),
+       *     consentVersion:      str   (e.g. "1.0"),
+       *     biometricsActive:    bool  (True unless embeddingsDeleted == True),
+       *     consentWithdrawnAt:  str | null  (ISO 8601 if withdrawn, else omit/null),
+       *   }
        *
-       * NOTE: This endpoint is intentionally public. Matric numbers are not secret —
-       *   they appear on ID cards. The data returned is the student's own attendance,
-       *   not anyone else's. If you want stricter privacy, add a PIN or OTP step.
+       * Return 404 { detail: "No student found with this matric number" }
+       *   if the matric number does not exist in any course.
        */
       lookup: async (matricNumber: string): Promise<StudentAttendanceSummary[]> => {
         const encoded = encodeURIComponent(matricNumber.trim().toUpperCase());
