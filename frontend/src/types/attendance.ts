@@ -107,7 +107,7 @@ export interface StudentAttendanceSummary {
   courseName: string;
   presentCount: number;
   totalSessions: number;              // all ended sessions for this course
-  attendanceRate: number;             // 0–100, computed by backend
+  attendanceRate: number;             // 0–1 float, e.g. 0.75 — backend computes, frontend multiplies ×100 for display
   sessions: StudentSessionRecord[];
   consent: ConsentRecord;             // NDPA s.34 — always included
 }

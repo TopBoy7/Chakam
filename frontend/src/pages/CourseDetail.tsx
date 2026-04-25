@@ -209,7 +209,7 @@ const CourseDetail = () => {
       ]);
       setCourse(courseData);
       setStudents(studentsData);
-      setSessions(sessionsData);
+      setSessions(sessionsData.map((s) => ({ ...s, totalStudents: studentsData.length })));
       setClassrooms(classroomsData);
 
       // Fetch records for all ended sessions to compute per-student attendance rates.
@@ -260,7 +260,7 @@ const CourseDetail = () => {
       const session = await api.attendance.sessions.start(courseId, selectedClassroomId);
       const classroom = classrooms.find((c) => c.classId === selectedClassroomId);
       setSessions((prev) => [
-        { ...session, classroomName: classroom?.className ?? session.classroomName },
+        { ...session, classroomName: classroom?.className ?? session.classroomName, totalStudents: students.length },
         ...prev,
       ]);
       setAttendanceRecords([]);

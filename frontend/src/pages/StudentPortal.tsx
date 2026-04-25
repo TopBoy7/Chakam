@@ -145,7 +145,7 @@ const StudentPortal = () => {
             <div className="flex gap-3">
               <Input
                 id="matric"
-                placeholder="e.g. 19/30CS/01234"
+                placeholder="e.g. 190403014"
                 value={matric}
                 onChange={(e) => setMatric(e.target.value)}
                 className="font-mono bg-background flex-1"

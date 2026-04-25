@@ -135,6 +135,10 @@ class ManualAttendanceRequest(BaseModel):
     }
 
 
+class DeleteBiometricsRequest(BaseModel):
+    matricNumber: str
+
+
 # -------------------------------------------------------
 # SHARED RESPONSE
 # -------------------------------------------------------

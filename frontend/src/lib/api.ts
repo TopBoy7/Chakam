@@ -9,7 +9,17 @@ const WS_BASE  = import.meta.env.VITE_WS_URL       || 'ws://localhost:8000';
 async function throwOnError(res: Response): Promise<Response> {
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
-    try { detail = (await res.json())?.detail || detail; } catch { /* ignore */ }
+    try {
+      const raw = (await res.json())?.detail;
+      if (typeof raw === 'string') {
+        detail = raw;
+      } else if (Array.isArray(raw)) {
+        // FastAPI validation errors return an array of { msg, loc } objects
+        detail = raw.map((e: Record<string, unknown>) => String(e.msg || e.message || JSON.stringify(e))).join('; ');
+      } else if (raw) {
+        detail = JSON.stringify(raw);
+      }
+    } catch { /* ignore */ }
     throw new Error(detail);
   }
   return res;

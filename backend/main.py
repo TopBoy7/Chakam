@@ -980,7 +980,7 @@ async def register_student_for_course(
 # COURSE-SCOPED BIOMETRICS DELETION
 # -------------------------------------------------------
 @app.delete("/courses/{courseCode}/students/biometrics", response_model=schemas.ResponseModel)
-async def delete_course_student_biometrics(courseCode: str, req: schemas.ManualAttendanceRequest):
+async def delete_course_student_biometrics(courseCode: str, req: schemas.DeleteBiometricsRequest):
     """Delete a student's face embeddings for consent withdrawal (NDPA s.36).
     Body: { matricNumber: string }"""
     matric = req.matricNumber.strip().upper()
