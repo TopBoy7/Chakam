@@ -1,4 +1,5 @@
-import type { Course, RegisteredStudent, Session, AttendanceRecord, StudentAttendanceSummary } from '@/types/attendance';
+import type { Course, RegisteredStudent, Session, AttendanceRecord, StudentAttendanceSummary, StudentRecord, Enrollment } from '@/types/attendance';
+import type { Lecturer } from '@/types/lecturer';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const WS_BASE  = import.meta.env.VITE_WS_URL       || 'ws://localhost:8000';
@@ -52,6 +53,38 @@ function transformAttendees(attendees: Array<Record<string, unknown>>, sessionId
   }));
 }
 
+function transformLecturer(raw: Record<string, unknown>): Lecturer {
+  return {
+    id: (raw.id ?? raw._id ?? raw.staffId) as string,
+    staffId: raw.staffId as string,
+    fullName: raw.fullName as string,
+    email: raw.email as string,
+    createdAt: raw.createdAt as string,
+  };
+}
+
+function transformStudentRecord(raw: Record<string, unknown>): StudentRecord {
+  return {
+    id: (raw.id ?? raw._id ?? raw.matricNumber) as string,
+    matricNumber: raw.matricNumber as string,
+    fullName: (raw.fullName as string) || '',
+    registeredAt: raw.registeredAt as string,
+    embeddingsDeleted: (raw.embeddingsDeleted as boolean) ?? false,
+    consentTimestamp: raw.consentTimestamp as string | undefined,
+    consentVersion: (raw.consentVersion as string) || '1.0',
+    consentWithdrawnAt: raw.consentWithdrawnAt as string | undefined,
+  };
+}
+
+function transformEnrollment(raw: Record<string, unknown>): Enrollment {
+  return {
+    id: (raw.id ?? raw._id ?? `${raw.courseCode}-${raw.matricNumber}`) as string,
+    courseCode: raw.courseCode as string,
+    matricNumber: raw.matricNumber as string,
+    enrolledAt: raw.enrolledAt as string,
+  };
+}
+
 // ── api ───────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -94,6 +127,63 @@ export const api = {
   },
 
   // ===========================================================================
+  // LECTURERS  (GET /lecturers, POST /lecturers, GET /lecturers/{staffId}, DELETE /lecturers/{staffId})
+  // ===========================================================================
+  lecturers: {
+    list: async (): Promise<Lecturer[]> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/lecturers`));
+      const raw: Array<Record<string, unknown>> = (await res.json()).data.lecturers ?? [];
+      return raw.map(transformLecturer);
+    },
+    get: async (staffId: string): Promise<Lecturer> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`));
+      return transformLecturer((await res.json()).data.lecturer);
+    },
+    create: async (payload: { staffId: string; fullName: string; email: string }): Promise<string> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/lecturers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }));
+      return (await res.json()).data.id as string;
+    },
+    delete: async (staffId: string): Promise<void> => {
+      await throwOnError(await fetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`, { method: 'DELETE' }));
+    },
+  },
+
+  // ===========================================================================
+  // STUDENTS  (admin — GET /students, GET /students/{matric}, DELETE embeddings, register)
+  // ===========================================================================
+  students: {
+    list: async (): Promise<StudentRecord[]> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/students`));
+      const raw: Array<Record<string, unknown>> = (await res.json()).data.students ?? [];
+      return raw.map(transformStudentRecord);
+    },
+    get: async (matricNumber: string): Promise<StudentRecord> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}`));
+      return transformStudentRecord((await res.json()).data.student);
+    },
+    deleteEmbeddings: async (matricNumber: string): Promise<void> => {
+      await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/embeddings`, {
+        method: 'DELETE',
+      }));
+    },
+    getEnrollments: async (matricNumber: string): Promise<Enrollment[]> => {
+      const res = await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/enrollments`));
+      const raw: Array<Record<string, unknown>> = (await res.json()).data.enrollments ?? [];
+      return raw.map(transformEnrollment);
+    },
+    register: async (formData: FormData): Promise<void> => {
+      await throwOnError(await fetch(`${API_BASE}/students/register`, {
+        method: 'POST',
+        body: formData,
+      }));
+    },
+  },
+
+  // ===========================================================================
   // ATTENDANCE MODULE
   // ===========================================================================
   attendance: {
@@ -105,7 +195,6 @@ export const api = {
         const res = await throwOnError(await fetch(`${API_BASE}/courses`));
         const rawCourses: Record<string, unknown>[] = (await res.json()).data.courses;
 
-        // Parallel-fetch enrollment counts for all courses
         const counts = await Promise.all(
           rawCourses.map(async (c) => {
             try {
@@ -126,7 +215,6 @@ export const api = {
         const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}`));
         const raw = (await res.json()).data.course as Record<string, unknown>;
 
-        // Fetch enrollment count for this single course
         let studentCount = 0;
         try {
           const r = await fetch(`${API_BASE}/courses/${courseCode}/enrollments`);
@@ -145,10 +233,19 @@ export const api = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }));
-        // Backend returns only {id}; fetch the full course
         const res = await throwOnError(await fetch(`${API_BASE}/courses/${payload.courseCode}`));
         const raw = (await res.json()).data.course as Record<string, unknown>;
         return transformCourse(raw, 0);
+      },
+
+      update: async (courseCode: string, payload: { courseName?: string; lecturerId?: string }): Promise<Course> => {
+        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }));
+        const raw = (await res.json()).data.course as Record<string, unknown>;
+        return transformCourse(raw);
       },
 
       delete: async (courseCode: string): Promise<void> => {
@@ -156,7 +253,32 @@ export const api = {
       },
     },
 
-    // ── STUDENTS ───────────────────────────────────────────────────────────────
+    // ── ENROLLMENTS ────────────────────────────────────────────────────────────
+    enrollments: {
+
+      list: async (courseCode: string): Promise<Enrollment[]> => {
+        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/enrollments`));
+        const raw: Array<Record<string, unknown>> = (await res.json()).data.enrollments ?? [];
+        return raw.map(transformEnrollment);
+      },
+
+      enroll: async (courseCode: string, matricNumber: string): Promise<void> => {
+        await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/enrollments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matricNumber }),
+        }));
+      },
+
+      unenroll: async (courseCode: string, matricNumber: string): Promise<void> => {
+        await throwOnError(await fetch(
+          `${API_BASE}/courses/${courseCode}/enrollments/${encodeURIComponent(matricNumber)}`,
+          { method: 'DELETE' }
+        ));
+      },
+    },
+
+    // ── STUDENTS (course-scoped) ────────────────────────────────────────────────
     students: {
 
       list: async (courseCode: string): Promise<RegisteredStudent[]> => {
@@ -191,10 +313,22 @@ export const api = {
     sessions: {
 
       list: async (courseCode: string): Promise<Session[]> => {
-        const encoded = encodeURIComponent(courseCode);
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions?courseCode=${encoded}`));
+        const res = await throwOnError(await fetch(`${API_BASE}/sessions?courseCode=${encodeURIComponent(courseCode)}`));
         const raw: Array<Record<string, unknown>> = (await res.json()).data.sessions ?? [];
         return raw.map(transformSession);
+      },
+
+      listByClass: async (classId: string, status?: string): Promise<Session[]> => {
+        const params = new URLSearchParams({ classId });
+        if (status) params.set('status', status);
+        const res = await throwOnError(await fetch(`${API_BASE}/sessions?${params}`));
+        const raw: Array<Record<string, unknown>> = (await res.json()).data.sessions ?? [];
+        return raw.map(transformSession);
+      },
+
+      get: async (sessionId: string): Promise<Session> => {
+        const res = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}`));
+        return transformSession((await res.json()).data.session);
       },
 
       start: async (courseCode: string, classId: string): Promise<Session> => {
@@ -204,10 +338,8 @@ export const api = {
           body: JSON.stringify({ courseCode, classId }),
         }));
         const { sessionId } = (await res.json()).data as { sessionId: string };
-        // Fetch the full session object
         const full = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}`));
-        const raw = (await full.json()).data.session as Record<string, unknown>;
-        return transformSession(raw);
+        return transformSession((await full.json()).data.session);
       },
 
       end: async (sessionId: string): Promise<void> => {
@@ -222,11 +354,14 @@ export const api = {
       },
 
       updateAttendance: async (sessionId: string, matricNumber: string, status: 'present' | 'absent'): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}/attendance/${encodeURIComponent(matricNumber)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
-        }));
+        await throwOnError(await fetch(
+          `${API_BASE}/sessions/${sessionId}/attendance/${encodeURIComponent(matricNumber)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+          }
+        ));
       },
 
       capture: async (sessionId: string): Promise<AttendanceRecord[]> => {
@@ -238,7 +373,6 @@ export const api = {
 
     // ── STUDENT PORTAL ─────────────────────────────────────────────────────────
     portal: {
-
       lookup: async (matricNumber: string): Promise<StudentAttendanceSummary[]> => {
         const encoded = encodeURIComponent(matricNumber.trim().toUpperCase());
         const res = await throwOnError(await fetch(`${API_BASE}/students/lookup/${encoded}`));

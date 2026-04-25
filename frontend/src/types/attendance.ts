@@ -81,6 +81,26 @@ export interface ConsentRecord {
   consentWithdrawnAt?: string;       // ISO 8601 — set when student deletes their data
 }
 
+// Admin-level student record (from GET /students — no embeddings)
+export interface StudentRecord {
+  id: string;
+  matricNumber: string;
+  fullName: string;
+  registeredAt: string;
+  embeddingsDeleted: boolean;
+  consentTimestamp?: string;
+  consentVersion: string;
+  consentWithdrawnAt?: string;
+}
+
+// Course enrollment record
+export interface Enrollment {
+  id: string;
+  courseCode: string;
+  matricNumber: string;
+  enrolledAt: string;
+}
+
 export interface StudentAttendanceSummary {
   courseId: string;
   courseCode: string;

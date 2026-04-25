@@ -11,6 +11,8 @@ import Attendance from "./pages/Attendance";
 import CourseDetail from "./pages/CourseDetail";
 import StudentRegistration from "./pages/StudentRegistration";
 import StudentPortal from "./pages/StudentPortal";
+import LecturersPage from "./pages/LecturersPage";
+import StudentsPage from "./pages/StudentsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +33,8 @@ const App = () => (
             <Route path="/attendance/course/:courseId" element={<CourseDetail />} />
             <Route path="/register/:token" element={<StudentRegistration />} />
             <Route path="/my-attendance" element={<StudentPortal />} />
+            <Route path="/lecturers" element={<LecturersPage />} />
+            <Route path="/students" element={<StudentsPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
