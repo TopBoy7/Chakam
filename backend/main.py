@@ -176,7 +176,10 @@ async def update_classroom(classId: str, req: schemas.UpdateClassroomRequest):
     if not existing:
         raise HTTPException(404, "classroom not found")
 
-    if payload.get("classId") != classId:
+    if not payload:
+        raise HTTPException(400, "no fields to update")
+
+    if "classId" in payload and payload["classId"] != classId:
         other = await database.get_classroom_by_classId(payload["classId"])
         if other:
             raise HTTPException(409, "new classId already exists")
@@ -1020,7 +1023,11 @@ async def update_student_attendance(sessionId: str, matricNumber: str, req: dict
     if not session:
         raise HTTPException(404, "session not found")
 
-    present = req.get("status") == "present"
+    status_value = req.get("status")
+    if status_value not in {"present", "absent"}:
+        raise HTTPException(400, "status must be 'present' or 'absent'")
+
+    present = status_value == "present"
     student = await database.get_student_by_matric(matricNumber)
     full_name = student.fullName if student else matricNumber
 

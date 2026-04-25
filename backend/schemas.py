@@ -25,6 +25,20 @@ class CreateClassroomRequest(BaseModel):
         }
     }
 
+    @field_validator("capacity")
+    @classmethod
+    def capacity_non_negative(cls, v):
+        if v < 0:
+            raise ValueError("capacity must be >= 0")
+        return v
+
+    @field_validator("occupancy")
+    @classmethod
+    def occupancy_non_negative(cls, v):
+        if v < 0:
+            raise ValueError("occupancy must be >= 0")
+        return v
+
 
 class UpdateClassroomRequest(BaseModel):
     className: Union[str, None] = None
