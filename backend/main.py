@@ -84,6 +84,9 @@ manager = ConnectionManager()
 # -------------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------------
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
 app = FastAPI(title="Smart Classroom - FastAPI + YOLO + MongoDB")
 
 app.add_middleware(
@@ -93,6 +96,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "message": str(exc)},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
 
 
 # -------------------------------------------------------
@@ -943,20 +954,18 @@ async def register_student_for_course(
             "face recognition service not available on this server",
         )
 
-    import asyncio
-    loop = asyncio.get_running_loop()
-
     embeddings: List[List[float]] = []
     for i, photo in enumerate(photos):
         contents = await photo.read()
-        arr = np.frombuffer(contents, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            raise HTTPException(400, f"invalid image in photo {i + 1}")
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encodings = await loop.run_in_executor(
-            None, lambda rgb=rgb: face_recognition.face_encodings(rgb)
-        )
+        try:
+            rgb = face_recognition.load_image_file(BytesIO(contents))
+        except Exception as load_exc:
+            raise HTTPException(400, f"invalid image in photo {i + 1}: {load_exc}")
+        logging.warning(f"[reg] photo {i+1}: shape={rgb.shape} dtype={rgb.dtype} C_CONTIGUOUS={rgb.flags['C_CONTIGUOUS']} len_bytes={len(contents)}")
+        try:
+            encodings = face_recognition.face_encodings(rgb)
+        except Exception as exc:
+            raise HTTPException(422, f"could not process photo {i + 1}: {exc}")
         if not encodings:
             raise HTTPException(422, f"no face detected in photo {i + 1}")
         embeddings.append(encodings[0].tolist())

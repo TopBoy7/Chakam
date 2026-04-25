@@ -437,3 +437,155 @@ SUMMARY: Push frontend + backend code to fix production. The Python/venv
 change is local only and has no bearing on the deployed environment.
 
 ================================================================================
+
+
+================================================================================
+  CORS + REGISTRATION FIXES — 2026-04-25
+================================================================================
+
+OVERVIEW
+--------
+Registration was failing with "Failed to fetch" in the browser. Root cause was
+a chain of three separate issues uncovered one at a time.
+
+
+================================================================================
+  FIX 1 — CORS credentials misconfiguration
+================================================================================
+
+File: backend/main.py
+
+Before:
+  app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, ...)
+
+After:
+  app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, ...)
+
+Why:
+  Combining allow_origins=["*"] with allow_credentials=True is forbidden by the
+  CORS spec. Starlette silently drops the Access-Control-Allow-Origin header in
+  this case, so the browser blocks every response. Since the app uses localStorage
+  (not cookies), credentials do not need to be sent with requests — False is correct.
+
+
+================================================================================
+  FIX 2 — Global exception handler (CORS headers on 500 errors)
+================================================================================
+
+File: backend/main.py
+
+Added after the CORS middleware setup:
+
+  from fastapi.responses import JSONResponse
+  from fastapi import Request
+
+  @app.exception_handler(Exception)
+  async def global_exception_handler(request: Request, exc: Exception):
+      return JSONResponse(
+          status_code=500,
+          content={"success": False, "message": str(exc)},
+          headers={"Access-Control-Allow-Origin": "*"},
+      )
+
+Why:
+  When the server crashes with an unhandled exception, Starlette's CORS
+  middleware never gets to inject the Access-Control-Allow-Origin header into
+  the error response. The browser sees no CORS header on the 500 and blocks it,
+  showing "Failed to fetch" instead of the actual error. This handler catches
+  all unhandled exceptions at the FastAPI level — before they escape to uvicorn
+  — and returns a proper JSON response with CORS headers, so the browser always
+  sees a readable error message.
+
+
+================================================================================
+  FIX 3 — dlib broken due to NumPy 2.x (root cause of registration failure)
+================================================================================
+
+Problem:
+  Even after fixing CORS, registration returned:
+    "could not process photo 1: Unsupported image type, must be 8bit gray or RGB image."
+
+  This error came from dlib's HOG face detector. Adding diagnostic logging
+  confirmed the numpy array was perfectly valid:
+    shape=(1080, 608, 3), dtype=uint8, C_CONTIGUOUS=True
+
+  Running dlib directly with a synthetic zero-filled image also failed with
+  the same error — proving the issue was not the uploaded photos but dlib itself.
+
+Root cause:
+  NumPy installed in the venv was 2.4.4. The pre-built dlib wheel
+  (dlib-19.24.1-cp311-cp311-win_amd64.whl from github.com/z-mahmud22) was
+  compiled against NumPy 1.x. NumPy 2.0 changed the internal C API in a way
+  that breaks extensions compiled against 1.x — specifically the PyArrayObject
+  struct layout — causing dlib to misread array metadata and reject all images.
+
+Why downgrading is correct here (not all upgrades are better):
+  NumPy 2.0 was not a normal incremental upgrade — it was a major breaking
+  release that changed the internal C structure of how numpy stores array data
+  in memory (PyArrayObject). This is a low-level change that affects any code
+  written in C/C++ that links directly against numpy, such as dlib's Python
+  bindings.
+
+  The dlib wheel installed is a pre-compiled .whl file — someone compiled the
+  C++ dlib code on their machine and packaged the binary result. That binary
+  was built against NumPy 1.x and has the old memory layout baked in. When run
+  against NumPy 2.x, the memory layout has shifted. When dlib asks numpy "where
+  is this array's data?", it reads the wrong memory location and concludes the
+  array is invalid — hence "Unsupported image type" even on a perfect array.
+
+  Analogy: the dlib wheel is a key cut to fit a lock (NumPy 1.x API). NumPy 2.0
+  changed the lock. The key looks the same but no longer fits, even though the
+  key itself is perfectly fine.
+
+  This is a Windows-only problem. On Linux deployment servers, pip compiles dlib
+  from source during "pip install -r requirements.txt". The compilation happens
+  against whatever numpy is current, so the binary is always built for the
+  installed version. The mismatch only happens on Windows where pre-built wheels
+  compiled by a third party at a fixed point in time are used instead.
+
+Fix:
+  Downgraded NumPy from 2.4.4 to 1.26.4 (last 1.x release):
+    pip install "numpy<2"
+
+  Both dlib and OpenCV (cv2) tested and confirmed working after the downgrade.
+  OpenCV's package metadata says numpy>=2 is required, but the runtime works
+  correctly with 1.26.4.
+
+Also changed (backend/main.py — registration image loading):
+  The image loading in the registration route was also refactored from manual
+  OpenCV decoding to face_recognition.load_image_file(BytesIO(contents)),
+  which is the library's own loader and the correct way to pass uploaded image
+  bytes to face_recognition. Each image load and encoding step is now wrapped
+  in its own try/except so errors return readable HTTP responses instead of
+  crashing the server.
+
+  Before:
+    arr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    encodings = await loop.run_in_executor(None, lambda: face_recognition.face_encodings(rgb))
+
+  After:
+    rgb = face_recognition.load_image_file(BytesIO(contents))
+    encodings = face_recognition.face_encodings(rgb)
+
+
+================================================================================
+  DEPLOYMENT IMPACT
+================================================================================
+
+  NumPy downgrade — NO impact on deployment
+  ------------------------------------------
+  The local .venv is never uploaded. On Linux deployment platforms, pip installs
+  packages fresh from requirements.txt. The dlib wheel on Linux (from PyPI or
+  compiled from source with gcc) is built against whatever NumPy is installed at
+  that time and does not have this compatibility issue. No changes to
+  requirements.txt are needed.
+
+  backend/main.py changes — MUST be deployed
+  -------------------------------------------
+  - Global exception handler and registration image loading refactor
+  - Global exception handler       (improves error visibility everywhere)
+  - Registration image loading refactor + per-step error handling
+
+================================================================================
