@@ -175,10 +175,11 @@ Admin and lecturer logins were previously identical — both used a single
 password dialog with no distinction between roles. This was changed so each
 role has its own credentials and login flow, with the backend validating both.
 
-Role access matrix after the change:
+Role access matrix after the change:(not yet done)
   Admin    → Dashboard, Lecturers, Students, Attendance, My Attendance
   Lecturer → Dashboard, Attendance, My Attendance
   Public   → Dashboard, My Attendance
+
 
 
 ================================================================================
