@@ -552,22 +552,46 @@ Fix:
   correctly with 1.26.4.
 
 Also changed (backend/main.py — registration image loading):
-  The image loading in the registration route was also refactored from manual
-  OpenCV decoding to face_recognition.load_image_file(BytesIO(contents)),
-  which is the library's own loader and the correct way to pass uploaded image
-  bytes to face_recognition. Each image load and encoding step is now wrapped
-  in its own try/except so errors return readable HTTP responses instead of
-  crashing the server.
+  The image loading in the registration route was refactored from a manual
+  three-step OpenCV pipeline to face_recognition.load_image_file(BytesIO(contents)),
+  which is the library's own loader.
 
   Before:
     arr = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)  # loads in BGR order
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # manual flip to RGB
     encodings = await loop.run_in_executor(None, lambda: face_recognition.face_encodings(rgb))
 
   After:
-    rgb = face_recognition.load_image_file(BytesIO(contents))
+    rgb = face_recognition.load_image_file(BytesIO(contents))  # loads in RGB directly
     encodings = face_recognition.face_encodings(rgb)
+
+  Why this matters:
+    OpenCV always loads images in BGR (Blue, Green, Red) order — the opposite of
+    what face_recognition expects. The old code relied on a manual cvtColor step
+    to flip the channels to RGB before passing to face_recognition. If anyone ever
+    modified that code and removed or misplaced that step, face_recognition would
+    receive BGR data and produce wrong embeddings — faces would be encoded
+    incorrectly and recognition would silently fail with no error, just bad results.
+
+    face_recognition.load_image_file uses PIL internally, which loads directly in
+    RGB order. No manual channel conversion needed. The output is exactly what
+    face_recognition expects because it is using its own loader to produce it.
+
+  Additional benefits going forward:
+    - Format support: PIL handles more image formats than OpenCV out of the box
+      (WebP, TIFF, various JPEG variants). Unusual photo formats from student
+      devices are more likely to load correctly.
+    - Maintainability: one line is harder to break than three. The BGR/RGB
+      distinction is a silent failure mode that is now eliminated entirely.
+    - Error handling: each step (loading and encoding) is now in its own
+      try/except, so failures return readable HTTP error responses instead of
+      crashing the server and stripping CORS headers.
+
+  Tradeoff:
+    PIL is slightly slower than OpenCV for decoding large images. This has no
+    practical impact on registration, which is a one-time action per student
+    per course and not a real-time or high-throughput operation.
 
 
 ================================================================================
