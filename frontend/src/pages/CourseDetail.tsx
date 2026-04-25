@@ -230,7 +230,7 @@ const CourseDetail = () => {
     setStarting(true);
     try {
       const session = await api.attendance.sessions.start(courseId, selectedClassroomId);
-      const classroom = classrooms.find((c) => c.id === selectedClassroomId);
+      const classroom = classrooms.find((c) => c.classId === selectedClassroomId);
       setSessions((prev) => [
         { ...session, classroomName: classroom?.className ?? session.classroomName },
         ...prev,
@@ -419,7 +419,7 @@ const CourseDetail = () => {
 
   const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
   const endedSessions = sessions.filter((s) => s.status === "ended");
-  const activeClassroom = classrooms.find((c) => c.id === activeSession?.classroomId) ?? null;
+  const activeClassroom = classrooms.find((c) => c.classId === activeSession?.classroomId) ?? null;
 
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
@@ -749,7 +749,7 @@ const CourseDetail = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {classrooms.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
+                            <SelectItem key={c.classId} value={c.classId}>
                               <span className="font-medium">{c.className}</span>
                               <span className="text-muted-foreground ml-1">
                                 ({c.classId})

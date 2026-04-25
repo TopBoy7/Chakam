@@ -16,9 +16,10 @@ export interface Course {
 export interface RegisteredStudent {
   id: string;
   matricNumber: string;
+  fullName: string;
   courseId: string;
   registeredAt: string;
-  // No photoUrl — photos are never stored (processed in memory only, NDPA s.24)
+  photoUrl?: string;  // never populated — photos are not stored (NDPA s.24)
 }
 
 export interface Session {

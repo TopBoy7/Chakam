@@ -113,13 +113,14 @@ const StudentRegistration = () => {
     if (!token) return;
     const fetchCourse = async () => {
       try {
-        const res = await fetch(`${API_BASE}/attendance/register/${token}`);
+        const res = await fetch(`${API_BASE}/register/${token}`);
         if (!res.ok) {
           const d = await res.json();
           throw new Error(d?.detail || "Invalid or expired registration link");
         }
         const data = await res.json();
-        setCourse(data.data.course);
+        const raw = data.data.course;
+        setCourse({ ...raw, id: raw.courseCode, studentCount: 0 });
       } catch (err) {
         setCourseError(err instanceof Error ? err.message : "Failed to load registration info");
       } finally {
