@@ -101,6 +101,7 @@ const StudentRegistration = () => {
   const [manualAltConsent, setManualAltConsent] = useState(false);
   const [ageConsent, setAgeConsent]             = useState(false);
   const [matricNumber, setMatricNumber]         = useState("");
+  const [fullName, setFullName]                 = useState("");
   const [photoFiles, setPhotoFiles]             = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews]       = useState<string[]>([]);
   const [submitting, setSubmitting]             = useState(false);
@@ -113,13 +114,14 @@ const StudentRegistration = () => {
     if (!token) return;
     const fetchCourse = async () => {
       try {
-        const res = await fetch(`${API_BASE}/attendance/register/${token}`);
+        const res = await fetch(`${API_BASE}/register/${token}`);
         if (!res.ok) {
           const d = await res.json();
           throw new Error(d?.detail || "Invalid or expired registration link");
         }
         const data = await res.json();
-        setCourse(data.data.course);
+        const raw = data.data.course;
+        setCourse({ ...raw, id: raw.courseCode, studentCount: 0 });
       } catch (err) {
         setCourseError(err instanceof Error ? err.message : "Failed to load registration info");
       } finally {
@@ -159,12 +161,13 @@ const StudentRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
+    if (!course || !matricNumber.trim() || !fullName.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const formData = new FormData();
       formData.append("matricNumber", matricNumber.trim().toUpperCase());
+      formData.append("fullName", fullName.trim());
       formData.append("biometricConsent", "true");
       formData.append("manualAltConsent", "true");
       formData.append("ageConsent", "true");
@@ -446,12 +449,28 @@ const StudentRegistration = () => {
                 </Label>
                 <Input
                   id="matric"
-                  placeholder="e.g. 19/30CS/01234"
+                  placeholder="e.g. 190403014"
                   value={matricNumber}
                   onChange={(e) => setMatricNumber(e.target.value)}
                   required
                   disabled={!biometricConsent}
                   className="font-mono bg-background"
+                />
+              </div>
+
+              {/* Full Name */}
+              <div className="space-y-2">
+                <Label htmlFor="fullName" className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Full Name
+                </Label>
+                <Input
+                  id="fullName"
+                  placeholder="e.g. Chukwuemeka Obi"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                  disabled={!biometricConsent}
+                  className="bg-background"
                 />
               </div>
 
@@ -534,7 +553,7 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || !matricNumber.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
+                disabled={submitting || !matricNumber.trim() || !fullName.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
               >
                 {submitting ? (
                   <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>

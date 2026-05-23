@@ -2,9 +2,11 @@ import { Link, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Navigation = () => {
   const location = useLocation();
+  const { isAdmin } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -17,18 +19,31 @@ const Navigation = () => {
   // Close mobile menu on route change
   useEffect(() => setIsOpen(false), [location.pathname]);
 
-  const links = [
-    { to: "/", label: "Home" },
-    { to: "/dashboard", label: "Dashboard" },
-    { to: "/attendance", label: "Attendance" },
-    { to: "/my-attendance", label: "My Attendance" },
-  ];
+  const links = isAdmin
+    ? [
+        { to: "/", label: "Home" },
+        { to: "/dashboard", label: "Dashboard" },
+        { to: "/lecturers", label: "Lecturers" },
+        { to: "/students", label: "Students" },
+        { to: "/attendance", label: "Attendance" },
+        { to: "/my-attendance", label: "My Attendance" },
+      ]
+    : [
+        { to: "/", label: "Home" },
+        { to: "/dashboard", label: "Dashboard" },
+        { to: "/attendance", label: "Attendance" },
+        { to: "/my-attendance", label: "My Attendance" },
+      ];
 
   const isActive = (to: string) => {
     if (to === "/attendance")
       return location.pathname === "/attendance" || location.pathname.startsWith("/attendance/");
     if (to === "/my-attendance")
       return location.pathname === "/my-attendance";
+    if (to === "/lecturers")
+      return location.pathname === "/lecturers";
+    if (to === "/students")
+      return location.pathname === "/students";
     return location.pathname === to;
   };
 

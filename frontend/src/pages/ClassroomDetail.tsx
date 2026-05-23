@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import { format } from "date-fns";
 import { api } from "@/lib/api";
 import { useClassroomWebSocket } from "@/hooks/useClassroomWebSocket";
 import Navigation from "@/components/Navigation";
@@ -15,10 +16,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ChevronLeft, Trash2, Users, Calendar, Clock, Edit2, AlertCircle, Cpu } from "lucide-react";
+import { ChevronLeft, Trash2, Users, Calendar, Clock, Edit2, AlertCircle, Cpu, BookOpen, UserCheck } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Classroom, UpdateClassroomRequest } from "@/types/classroom";
+import type { Session } from "@/types/attendance";
 
 // Status colour uses design tokens — no hardcoded Tailwind colour classes.
 function statusInfo(pct: number): { label: string; cls: string } {
@@ -40,8 +43,11 @@ const ClassroomDetail = () => {
   const [showEditDialog, setShowEditDialog]   = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  const [sessions, setSessions]           = useState<Session[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
   useEffect(() => {
-    const fetch = async () => {
+    const fetchAll = async () => {
       if (!classId) return;
       try {
         setError(null);
@@ -52,8 +58,16 @@ const ClassroomDetail = () => {
       } finally {
         setLoading(false);
       }
+      // Fetch session history in parallel (non-blocking)
+      setSessionsLoading(true);
+      try {
+        const s = await api.attendance.sessions.listByClass(classId);
+        setSessions(s.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()));
+      } catch { /* ignore */ } finally {
+        setSessionsLoading(false);
+      }
     };
-    fetch();
+    fetchAll();
   }, [classId]);
 
   // Real-time occupancy updates via WebSocket.
@@ -292,6 +306,52 @@ const ClassroomDetail = () => {
                 )}
               </div>
             )}
+
+            {/* Session history card */}
+            <div className="border border-border rounded-lg bg-card/60 p-6 space-y-3">
+              <p className="text-xs tracking-widest uppercase text-muted-foreground">
+                Session History
+              </p>
+              {sessionsLoading ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                  <div className="h-3.5 w-3.5 rounded-full border-2 border-border border-t-foreground animate-spin" />
+                  Loading…
+                </div>
+              ) : sessions.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-1">No sessions recorded for this classroom.</p>
+              ) : (
+                <div className="space-y-3 max-h-64 overflow-y-auto -mx-1 px-1">
+                  {sessions.map((s) => {
+                    const duration = s.endedAt
+                      ? Math.round((new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000)
+                      : null;
+                    return (
+                      <div key={s.id} className="space-y-1 border-b border-border last:border-0 pb-3 last:pb-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs text-foreground font-medium">
+                            <BookOpen className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            <span className="font-mono">{s.courseId}</span>
+                          </div>
+                          <Badge variant={s.status === "active" ? "default" : "secondary"} className="text-xs shrink-0">
+                            {s.status === "active" ? "Live" : "Ended"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground pl-5">
+                          {format(new Date(s.startedAt), "MMM d, yyyy · h:mm a")}
+                          {duration !== null && ` · ${duration} min`}
+                        </p>
+                        {s.presentCount > 0 && (
+                          <p className="text-xs text-muted-foreground pl-5 flex items-center gap-1">
+                            <UserCheck className="h-3 w-3" />
+                            {s.presentCount} present
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

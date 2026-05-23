@@ -8,3 +8,4 @@ ultralytics
 python-dotenv
 cloudinary
 websockets
+face_recognition

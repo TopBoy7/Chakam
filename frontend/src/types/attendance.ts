@@ -16,9 +16,10 @@ export interface Course {
 export interface RegisteredStudent {
   id: string;
   matricNumber: string;
+  fullName: string;
   courseId: string;
   registeredAt: string;
-  // No photoUrl — photos are never stored (processed in memory only, NDPA s.24)
+  photoUrl?: string;  // never populated — photos are not stored (NDPA s.24)
 }
 
 export interface Session {
@@ -80,13 +81,33 @@ export interface ConsentRecord {
   consentWithdrawnAt?: string;       // ISO 8601 — set when student deletes their data
 }
 
+// Admin-level student record (from GET /students — no embeddings)
+export interface StudentRecord {
+  id: string;
+  matricNumber: string;
+  fullName: string;
+  registeredAt: string;
+  embeddingsDeleted: boolean;
+  consentTimestamp?: string;
+  consentVersion: string;
+  consentWithdrawnAt?: string;
+}
+
+// Course enrollment record
+export interface Enrollment {
+  id: string;
+  courseCode: string;
+  matricNumber: string;
+  enrolledAt: string;
+}
+
 export interface StudentAttendanceSummary {
   courseId: string;
   courseCode: string;
   courseName: string;
   presentCount: number;
   totalSessions: number;              // all ended sessions for this course
-  attendanceRate: number;             // 0–100, computed by backend
+  attendanceRate: number;             // 0–1 float, e.g. 0.75 — backend computes, frontend multiplies ×100 for display
   sessions: StudentSessionRecord[];
   consent: ConsentRecord;             // NDPA s.34 — always included
 }

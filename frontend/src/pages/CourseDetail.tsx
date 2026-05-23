@@ -61,6 +61,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import {
   ChevronLeft,
   AlertCircle,
   Users,
@@ -78,6 +86,9 @@ import {
   Download,
   ChevronDown,
   Loader2,
+  Edit2,
+  UserPlus,
+  UserMinus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -86,6 +97,7 @@ import { exportAttendance } from "@/lib/exportAttendance";
 import type { ExportFormat } from "@/lib/exportAttendance";
 import type { Course, RegisteredStudent, Session, AttendanceRecord } from "@/types/attendance";
 import type { Classroom } from "@/types/classroom";
+import type { Lecturer } from "@/types/lecturer";
 
 function formatElapsed(startedAt: string): string {
   const totalSeconds = Math.max(
@@ -122,6 +134,22 @@ const CourseDetail = () => {
   const [elapsed, setElapsed] = useState("");
   const [updatingStudent, setUpdatingStudent] = useState<string | null>(null);
   const [exportingSessionId, setExportingSessionId] = useState<string | null>(null);
+
+  // Edit course
+  const [showEditCourse, setShowEditCourse] = useState(false);
+  const [editCourseName, setEditCourseName] = useState("");
+  const [editLecturerId, setEditLecturerId] = useState("");
+  const [editLecturers, setEditLecturers] = useState<Lecturer[]>([]);
+  const [savingCourse, setSavingCourse] = useState(false);
+
+  // Enroll student
+  const [showEnroll, setShowEnroll] = useState(false);
+  const [enrollMatric, setEnrollMatric] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
+
+  // Unenroll student
+  const [unenrollTarget, setUnenrollTarget] = useState<RegisteredStudent | null>(null);
+  const [unenrolling, setUnenrolling] = useState(false);
 
   // Per-student attendance summary across ALL ended sessions.
   // Computed in loadData by fetching records for every ended session in parallel.
@@ -181,7 +209,7 @@ const CourseDetail = () => {
       ]);
       setCourse(courseData);
       setStudents(studentsData);
-      setSessions(sessionsData);
+      setSessions(sessionsData.map((s) => ({ ...s, totalStudents: studentsData.length })));
       setClassrooms(classroomsData);
 
       // Fetch records for all ended sessions to compute per-student attendance rates.
@@ -230,9 +258,9 @@ const CourseDetail = () => {
     setStarting(true);
     try {
       const session = await api.attendance.sessions.start(courseId, selectedClassroomId);
-      const classroom = classrooms.find((c) => c.id === selectedClassroomId);
+      const classroom = classrooms.find((c) => c.classId === selectedClassroomId);
       setSessions((prev) => [
-        { ...session, classroomName: classroom?.className ?? session.classroomName },
+        { ...session, classroomName: classroom?.className ?? session.classroomName, totalStudents: students.length },
         ...prev,
       ]);
       setAttendanceRecords([]);
@@ -392,6 +420,69 @@ const CourseDetail = () => {
     });
   };
 
+  const openEditCourse = async () => {
+    if (!course) return;
+    setEditCourseName(course.courseName);
+    setEditLecturerId("");
+    setShowEditCourse(true);
+    try {
+      const data = await api.lecturers.list();
+      setEditLecturers(data);
+    } catch { /* ignore — lecturer selector just stays empty */ }
+  };
+
+  const handleSaveCourse = async () => {
+    if (!courseId || !editCourseName.trim()) return;
+    setSavingCourse(true);
+    try {
+      const payload: { courseName?: string; lecturerId?: string } = {};
+      if (editCourseName.trim() !== course?.courseName) payload.courseName = editCourseName.trim();
+      if (editLecturerId) payload.lecturerId = editLecturerId;
+      if (Object.keys(payload).length === 0) { setShowEditCourse(false); return; }
+      const updated = await api.attendance.courses.update(courseId, payload);
+      setCourse(updated);
+      setShowEditCourse(false);
+      toast.success("Course updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update course");
+    } finally {
+      setSavingCourse(false);
+    }
+  };
+
+  const handleEnrollStudent = async () => {
+    if (!courseId || !enrollMatric.trim()) return;
+    setEnrolling(true);
+    try {
+      await api.attendance.enrollments.enroll(courseId, enrollMatric.trim().toUpperCase());
+      // Refresh student list
+      const updated = await api.attendance.students.list(courseId);
+      setStudents(updated);
+      setEnrollMatric("");
+      setShowEnroll(false);
+      toast.success("Student enrolled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to enroll student");
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const handleUnenrollStudent = async () => {
+    if (!courseId || !unenrollTarget) return;
+    setUnenrolling(true);
+    try {
+      await api.attendance.enrollments.unenroll(courseId, unenrollTarget.matricNumber);
+      setStudents((prev) => prev.filter((s) => s.matricNumber !== unenrollTarget.matricNumber));
+      setUnenrollTarget(null);
+      toast.success("Student unenrolled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to unenroll student");
+    } finally {
+      setUnenrolling(false);
+    }
+  };
+
   // ── Export helper ────────────────────────────────────────────────────────────
 
   const handleExportSession = async (session: Session, fmt: ExportFormat) => {
@@ -419,7 +510,7 @@ const CourseDetail = () => {
 
   const presentCount = attendanceRecords.filter((r) => r.status === "present").length;
   const endedSessions = sessions.filter((s) => s.status === "ended");
-  const activeClassroom = classrooms.find((c) => c.id === activeSession?.classroomId) ?? null;
+  const activeClassroom = classrooms.find((c) => c.classId === activeSession?.classroomId) ?? null;
 
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
@@ -493,6 +584,16 @@ const CourseDetail = () => {
               <Copy className="h-3.5 w-3.5" />
               Copy link
             </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={openEditCourse}
+                className="flex items-center gap-1.5 hover:text-foreground transition-colors tracking-widest uppercase"
+              >
+                <Edit2 className="h-3.5 w-3.5" />
+                Edit
+              </button>
+            )}
           </div>
         </div>
 
@@ -649,6 +750,15 @@ const CourseDetail = () => {
 
               {/* Students Tab */}
               <TabsContent value="students" className="space-y-2 focus-visible:outline-none">
+                {/* Enroll existing student action */}
+                {isAdmin && (
+                  <div className="flex justify-end mb-2">
+                    <Button variant="outline" size="sm" onClick={() => setShowEnroll(true)} className="text-xs tracking-widest uppercase">
+                      <UserPlus className="h-3.5 w-3.5 mr-2" />
+                      Enroll Student
+                    </Button>
+                  </div>
+                )}
                 {students.length === 0 ? (
                   <div className="text-center py-16 text-muted-foreground">
                     <Users className="h-10 w-10 mx-auto mb-3 opacity-40" />
@@ -701,6 +811,7 @@ const CourseDetail = () => {
                                 {student.matricNumber}
                               </p>
                               <p className="text-xs text-muted-foreground">
+                                {student.fullName && <span>{student.fullName} · </span>}
                                 Registered{" "}
                                 {format(new Date(student.registeredAt), "MMM d, yyyy")}
                               </p>
@@ -709,6 +820,16 @@ const CourseDetail = () => {
                               <span className={`text-xs font-mono font-medium flex-shrink-0 ${thresholdBadge.cls}`}>
                                 {thresholdBadge.label}
                               </span>
+                            )}
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => setUnenrollTarget(student)}
+                                className="flex-shrink-0 text-muted-foreground/40 hover:text-destructive transition-colors p-1"
+                                title="Unenroll student"
+                              >
+                                <UserMinus className="h-4 w-4" />
+                              </button>
                             )}
                           </div>
                         </CardContent>
@@ -749,7 +870,7 @@ const CourseDetail = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {classrooms.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
+                            <SelectItem key={c.classId} value={c.classId}>
                               <span className="font-medium">{c.className}</span>
                               <span className="text-muted-foreground ml-1">
                                 ({c.classId})
@@ -945,6 +1066,119 @@ const CourseDetail = () => {
           </div>
         </div>
       </div>
+
+      {/* ── Edit Course Dialog ─────────────────────────────────────────────── */}
+      <Dialog open={showEditCourse} onOpenChange={setShowEditCourse}>
+        <DialogContent className="bg-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl font-normal">Edit Course</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="editCourseName" className="text-xs tracking-widest uppercase text-muted-foreground">Course Name</Label>
+              <Input
+                id="editCourseName"
+                value={editCourseName}
+                onChange={(e) => setEditCourseName(e.target.value)}
+                className="bg-background"
+              />
+            </div>
+            {editLecturers.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs tracking-widest uppercase text-muted-foreground">Assign Lecturer (optional)</Label>
+                <Select value={editLecturerId} onValueChange={setEditLecturerId}>
+                  <SelectTrigger className="bg-background">
+                    <SelectValue placeholder="No lecturer assigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {editLecturers.map((l) => (
+                      <SelectItem key={l.staffId} value={l.staffId}>
+                        {l.fullName}
+                        <span className="text-muted-foreground ml-1">({l.staffId})</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditCourse(false)} disabled={savingCourse} className="rounded-full text-xs tracking-widest uppercase">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveCourse}
+              disabled={savingCourse || !editCourseName.trim()}
+              className="rounded-full text-xs tracking-widest uppercase"
+            >
+              {savingCourse ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Enroll Student Dialog ──────────────────────────────────────────── */}
+      <Dialog open={showEnroll} onOpenChange={(open) => { setShowEnroll(open); if (!open) setEnrollMatric(""); }}>
+        <DialogContent className="bg-card sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-xl font-normal">Enroll Student</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              The student must already be registered in the system. Enter their matric number to enroll them in this course.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="enrollMatric" className="text-xs tracking-widest uppercase text-muted-foreground">Matric Number</Label>
+              <Input
+                id="enrollMatric"
+                placeholder="e.g. 190403014"
+                value={enrollMatric}
+                onChange={(e) => setEnrollMatric(e.target.value)}
+                className="bg-background font-mono"
+                onKeyDown={(e) => e.key === "Enter" && handleEnrollStudent()}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowEnroll(false); setEnrollMatric(""); }} disabled={enrolling} className="rounded-full text-xs tracking-widest uppercase">
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEnrollStudent}
+              disabled={enrolling || !enrollMatric.trim()}
+              className="rounded-full text-xs tracking-widest uppercase"
+            >
+              {enrolling ? "Enrolling…" : "Enroll"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Unenroll Confirmation ──────────────────────────────────────────── */}
+      <AlertDialog open={!!unenrollTarget} onOpenChange={(open) => !open && setUnenrollTarget(null)}>
+        <AlertDialogContent className="bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-serif text-xl font-normal">Unenroll student?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-muted-foreground">
+              This removes <strong className="text-foreground">{unenrollTarget?.matricNumber}</strong> from{" "}
+              <strong className="text-foreground">{course?.courseCode}</strong>. Their past attendance
+              records for this course are not deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unenrolling} className="border-border text-xs tracking-widest uppercase rounded-full">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleUnenrollStudent}
+              disabled={unenrolling}
+              className="bg-destructive text-destructive-foreground text-xs tracking-widest uppercase rounded-full hover:bg-destructive/90"
+            >
+              {unenrolling ? "Unenrolling…" : "Unenroll"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   );

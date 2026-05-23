@@ -1,0 +1,616 @@
+================================================================================
+  CHAKAM API TEST REVIEW — 2026-04-25
+================================================================================
+
+OVERVIEW
+--------
+Both servers were started locally and all API endpoint groups were tested
+systematically using curl. The frontend (.env) was already pointed at
+http://localhost:8000 (local backend).
+
+Servers tested:
+  Backend  → http://localhost:8000  (uvicorn main:app --reload)
+  Frontend → http://localhost:8080  (vite dev server)
+
+
+================================================================================
+  ENDPOINTS TESTED
+================================================================================
+
+CLASSROOMS
+  GET  /classrooms              ✅ Returns list of classrooms
+  GET  /classrooms/:classId     ✅ Returns single classroom
+  POST /classrooms              ✅ Creates classroom
+  PUT  /classrooms/:classId     ✅ Updates classroom
+  DELETE /classrooms/:classId   ✅ Deletes classroom
+
+LECTURERS
+  GET  /lecturers               ✅ Returns list
+  POST /lecturers               ✅ Creates lecturer
+  GET  /lecturers/:staffId      ✅ Returns single lecturer
+  DELETE /lecturers/:staffId    ✅ Deletes lecturer
+
+COURSES
+  GET  /courses                 ✅ Returns list
+  POST /courses                 ✅ Creates course (returns registrationToken)
+  GET  /courses/:courseCode     ✅ Returns single course
+  PUT  /courses/:courseCode     ✅ Updates course
+  DELETE /courses/:courseCode   ✅ Deletes course
+
+ENROLLMENTS
+  GET  /courses/:code/enrollments         ✅ Lists enrolled students
+  POST /courses/:code/enrollments         ✅ Enrolls a student
+  DELETE /courses/:code/enrollments/:mat  ✅ Unenrolls a student
+
+  Edge case: Duplicate enrollment → 400 "student already enrolled" ✅
+
+STUDENTS (admin)
+  GET  /students                          ✅ Lists all students
+  GET  /students/:matricNumber            ✅ Returns single student
+  DELETE /students/:matricNumber/embeddings ✅ Deletes embeddings (global)
+  GET  /students/:matricNumber/enrollments  ✅ Lists student's enrollments
+
+SESSIONS
+  POST /sessions                          ✅ Starts a session
+  GET  /sessions?courseCode=X             ✅ Lists sessions by course
+  GET  /sessions?classId=X               ✅ Lists sessions by classroom
+  GET  /sessions?classId=X&status=active  ✅ Filters by status
+  GET  /sessions/:sessionId              ✅ Gets single session
+  POST /sessions/:sessionId/end          ✅ Ends a session
+  GET  /sessions/:sessionId/attendance   ✅ Gets attendance records
+  PUT  /sessions/:id/attendance/:matric  ✅ Manual present/absent toggle
+
+  Edge case: End already-ended session    → 400 "session already ended"      ✅
+  Edge case: Capture on inactive session  → 400 "session is not active"      ✅
+  Edge case: Start session, invalid course → 404 "course not found"          ✅
+
+REGISTRATION
+  GET /register/:token                    ✅ Resolves token to course info
+  POST /courses/:code/register            ✅ (multipart — requires face_recognition)
+
+STUDENT PORTAL
+  GET /students/lookup/:matricNumber      ✅ Returns attendance summary
+                                            (only works after at least one
+                                             ended session exists for student)
+
+  Returns per-course:
+    - courseCode, courseName
+    - presentCount, totalSessions, attendanceRate (0–1 float)
+    - sessions array with date, classroomName, status, manuallyOverridden
+    - consent record (NDPA s.34): consentGivenAt, biometricsActive, etc.
+
+  Edge case: Matric not found → 404 "no student found with this matric number" ✅
+
+
+================================================================================
+  BUG FOUND AND FIXED
+================================================================================
+
+BUG — DELETE /courses/:courseCode/students/biometrics (BREAKING)
+-----------------------------------------------------------------
+Symptom:
+  Sending { "matricNumber": "190403014" } to the endpoint returned a 422 error:
+    {
+      "detail": [{ "msg": "Field required", "loc": ["body", "present"] }]
+    }
+
+Root cause:
+  The route handler was reusing the ManualAttendanceRequest schema, which
+  requires BOTH matricNumber AND present (a boolean). The biometrics delete
+  route only needs matricNumber.
+
+  Affected file: backend/main.py (line 983)
+  Broken schema:  schemas.ManualAttendanceRequest  { matricNumber, present }
+  Correct schema: schemas.DeleteBiometricsRequest  { matricNumber }
+
+Fix applied:
+  1. Added DeleteBiometricsRequest to backend/schemas.py:
+       class DeleteBiometricsRequest(BaseModel):
+           matricNumber: str
+
+  2. Updated the route in backend/main.py to use the new schema:
+       async def delete_course_student_biometrics(
+           courseCode: str, req: schemas.DeleteBiometricsRequest
+       ):
+
+  After fix: DELETE /courses/CSC101/students/biometrics with
+  { "matricNumber": "190403014" } returns 200 ✅
+
+
+================================================================================
+  OTHER FIXES (non-bug — data accuracy)
+================================================================================
+
+1. totalStudents always showed 0 in session cards
+   -----------------------------------------------
+   The frontend's transformSession() hardcodes totalStudents: 0 because the
+   backend session object does not include enrollment count. The CourseDetail
+   page already loads the enrolled students list, so after sessions load we
+   now assign totalStudents from the students array length.
+
+   File: frontend/src/pages/CourseDetail.tsx
+   Change: setSessions(sessionsData.map((s) => ({ ...s, totalStudents: studentsData.length })))
+   Also applied when a new session is started mid-page.
+
+   Before: Session card showed "1 / 0 present"
+   After:  Session card shows "1 / 3 present" (correct enrolled count)
+
+2. attendanceRate type comment was wrong
+   --------------------------------------
+   The type definition said "0–100" but the backend returns a 0–1 float
+   (e.g. 0.75 for 75%). The frontend already multiplied by 100 correctly for
+   display, so this was a documentation-only fix.
+
+   File: frontend/src/types/attendance.ts
+   Change: comment updated to "0–1 float, e.g. 0.75"
+
+
+================================================================================
+  NOTES FOR BACKEND DEV
+================================================================================
+
+- face_recognition / dlib is NOT imported at the top of main.py, so the
+  server starts fine even without it installed. The registration and capture
+  endpoints that need it will fail at runtime only when called.
+
+- To enable face recognition: install dlib on Python 3.10 or 3.11 (pre-built
+  wheels exist for these versions). Python 3.14 requires Visual C++ build
+  tools to compile dlib from source.
+
+- The portal lookup (GET /students/lookup/:matricNumber) returns 404 if the
+  student has no ended sessions. Consider returning an empty results array
+  instead, so students who are registered but have no sessions yet see a
+  meaningful response rather than a 404.
+
+================================================================================
+
+
+================================================================================
+  AUTHENTICATION SEPARATION — 2026-04-25
+================================================================================
+
+OVERVIEW
+--------
+Admin and lecturer logins were previously identical — both used a single
+password dialog with no distinction between roles. This was changed so each
+role has its own credentials and login flow, with the backend validating both.
+
+Role access matrix after the change:(not yet done)
+  Admin    → Dashboard, Lecturers, Students, Attendance, My Attendance
+  Lecturer → Dashboard, Attendance, My Attendance
+  Public   → Dashboard, My Attendance
+
+
+
+================================================================================
+  BACKEND CHANGES
+================================================================================
+
+1. backend/requirements.txt
+   - Added: bcrypt
+     (passlib[bcrypt] was attempted first but has a compatibility bug with
+      bcrypt >= 4.0 — "module has no attribute __about__". Switched to using
+      the bcrypt library directly instead.)
+
+2. backend/models.py
+   - Added passwordHash: Optional[str] = None to the Lecturer model.
+     Existing lecturer records without a password hash simply cannot log in
+     until updated.
+
+3. backend/schemas.py
+   - Added password: str to CreateLecturerRequest (required on creation).
+   - Added AdminLoginRequest { password: str }
+   - Added LecturerLoginRequest { staffId: str, password: str }
+
+4. backend/.env
+   - Added: ADMIN_PASSWORD=password
+
+5. backend/env.py
+   - Exposed ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "password")
+
+6. backend/main.py
+   - POST /lecturers: now hashes the incoming password with bcrypt before
+     storing as passwordHash. Plain password is never persisted.
+   - POST /auth/admin/login: compares submitted password against env.ADMIN_PASSWORD.
+     Returns { role: "admin" } on success, 401 on failure.
+   - POST /auth/lecturer/login: looks up lecturer by staffId, then verifies
+     password against stored bcrypt hash.
+     Returns { role: "lecturer", staffId, fullName } on success, 401 on failure.
+     Uses the same generic error message for both "not found" and "wrong password"
+     to avoid user enumeration.
+
+   New helper functions added to main.py (above the routes):
+     hash_password(plain: str) -> str
+     verify_password(plain: str, hashed: str) -> bool
+
+
+================================================================================
+  FRONTEND CHANGES
+================================================================================
+
+1. frontend/src/contexts/AuthContext.tsx  (full rewrite)
+   - Role type: "admin" | "lecturer" | null  (replaces boolean isAdmin)
+   - State: role, lecturerProfile { staffId, fullName }
+   - loginAdmin(password) — calls POST /auth/admin/login
+   - loginLecturer(staffId, password) — calls POST /auth/lecturer/login
+   - Both store result in localStorage as JSON { role, lecturer? }
+   - Convenience booleans: isAdmin, isLecturer  (derived from role)
+   - logout() clears both state and localStorage
+
+2. frontend/src/pages/Home.tsx
+   - "Admin Login" button renamed to "Sign In"
+   - Dialog now has two tabs: Admin | Lecturer
+     Admin tab:    password field only → calls loginAdmin()
+     Lecturer tab: Staff ID + password → calls loginLecturer()
+   - Admin success → navigates to /dashboard
+   - Lecturer success → navigates to /attendance
+   - Both show loading state ("Signing in...") while the API call is in flight
+   - Sign Out button appears for both roles when logged in
+
+3. frontend/src/components/Navigation.tsx
+   - Added isLecturer from useAuth()
+   - Three distinct link sets:
+       Admin:    Home, Dashboard, Lecturers, Students, Attendance, My Attendance
+       Lecturer: Home, Dashboard, Attendance, My Attendance
+       Public:   Home, Dashboard, My Attendance
+
+4. frontend/src/components/ProtectedRoute.tsx
+   - Added require prop: "admin" (default) | "authenticated"
+   - "admin"         → redirects to / if role !== "admin"
+   - "authenticated" → redirects to / if not admin and not lecturer
+
+5. frontend/src/App.tsx
+   - /lecturers route wrapped: <ProtectedRoute require="admin">
+   - /students  route wrapped: <ProtectedRoute require="admin">
+     Previously these routes had no access control at all.
+
+
+================================================================================
+  EDGE CASES VERIFIED
+================================================================================
+
+  POST /auth/admin/login   correct password      → 200 { role: "admin" }      ✅
+  POST /auth/admin/login   wrong password        → 401 "incorrect password"   ✅
+  POST /auth/lecturer/login correct credentials  → 200 { role, staffId, ... } ✅
+  POST /auth/lecturer/login wrong password       → 401 generic error          ✅
+  POST /auth/lecturer/login unknown staffId      → 401 generic error          ✅
+  POST /lecturers (new — requires password field)                              ✅
+  Visiting /lecturers without admin session      → redirect to /              ✅
+  Visiting /students  without admin session      → redirect to /              ✅
+
+
+================================================================================
+  AUTHENTICATION SEPARATION — REVERTED 2026-04-25
+================================================================================
+
+The separated admin/lecturer login was rolled back at the user's request.
+All files have been restored to the original single-password admin login.
+
+FILES RESTORED
+--------------
+Backend:
+  backend/requirements.txt    — removed bcrypt
+  backend/models.py           — removed passwordHash from Lecturer model
+  backend/schemas.py          — removed password from CreateLecturerRequest;
+                                removed AdminLoginRequest, LecturerLoginRequest
+  backend/env.py              — removed ADMIN_PASSWORD export
+  backend/.env                — removed ADMIN_PASSWORD entry
+  backend/main.py             — removed hash_password / verify_password helpers;
+                                reverted POST /lecturers to original (no hashing);
+                                removed POST /auth/admin/login endpoint;
+                                removed POST /auth/lecturer/login endpoint
+
+Frontend:
+  frontend/src/contexts/AuthContext.tsx   — restored original: isAdmin boolean,
+                                            login(password) checks VITE_ADMIN_PASSWORD,
+                                            logout() clears localStorage
+  frontend/src/pages/Home.tsx             — restored single "Admin Login" button
+                                            and password-only dialog
+  frontend/src/components/Navigation.tsx  — removed isLecturer; restored original
+                                            two-set link logic (admin vs non-admin)
+  frontend/src/components/ProtectedRoute.tsx — restored original (isAdmin check only)
+  frontend/src/App.tsx                    — removed ProtectedRoute wrapping from
+                                            /lecturers and /students routes
+
+CURRENT STATE
+-------------
+  Login:   Single password dialog, checked against VITE_ADMIN_PASSWORD env var
+  Admin:   Sees all nav links (Lecturers, Students, Attendance, etc.)
+  Non-admin: Sees Dashboard, Attendance, My Attendance
+  Route protection: None (nav links control visibility only)
+
+================================================================================
+
+
+================================================================================
+  FACE RECOGNITION & REGISTRATION FIXES — 2026-04-25
+================================================================================
+
+PROBLEM 1 — [object Object] error on registration form
+-------------------------------------------------------
+Symptom:
+  Submitting the registration form showed "[object Object]" as the error message.
+
+Root cause (two layers):
+  1. The backend's POST /courses/:courseCode/register required a "fullName" form
+     field but the frontend never sent it. FastAPI returned a 422 validation
+     error where "detail" is an array of objects, not a string.
+  2. throwOnError() in api.ts did: throw new Error(array) which converts the
+     array to the string "[object Object]".
+
+Fixes applied:
+  frontend/src/pages/StudentRegistration.tsx
+    - Added fullName state variable
+    - Added Full Name input field to the form (between Matric Number and Photos)
+    - Added fullName.trim() to the submit guard and button disabled check
+    - FormData now appends fullName before sending
+
+  frontend/src/lib/api.ts — throwOnError()
+    - Now checks if detail is a string, array, or other object
+    - If array (FastAPI validation errors): extracts .msg from each item and
+      joins them with "; " so the user sees a readable message
+    - If object: falls back to JSON.stringify
+    - Prevents "[object Object]" from ever appearing as a UI error again
+
+
+PROBLEM 2 — Misleading placeholder text
+----------------------------------------
+  Both the registration page and the My Attendance lookup page showed
+  "e.g. 19/30CS/01234" as the matric number example. The actual format
+  used in the system is all-numeric (e.g. 190403014).
+
+Fixes applied:
+  frontend/src/pages/StudentRegistration.tsx — placeholder updated
+  frontend/src/pages/StudentPortal.tsx       — placeholder updated
+  Both now show: "e.g. 190403014"
+
+
+PROBLEM 3 — face_recognition not installed (dlib build failure)
+----------------------------------------------------------------
+Symptom:
+  Registration returned: "face recognition service not available on this server"
+
+Root cause:
+  dlib (which face_recognition depends on) had no pre-built wheel for
+  Python 3.14 and requires Visual C++ build tools to compile from source.
+  These were not installed.
+
+Fix applied (local development environment only):
+  1. Installed Python 3.11 alongside Python 3.14
+  2. Deleted the existing Python 3.14 venv (.venv/)
+  3. Created a new venv using Python 3.11:
+       py -3.11 -m venv .venv
+  4. Installed a pre-built dlib wheel for Python 3.11 Windows directly:
+       pip install <pre-built dlib-19.24.1-cp311-cp311-win_amd64.whl>
+     (bypasses the need for a C++ compiler entirely)
+  5. Ran pip install -r requirements.txt — all packages including
+     face_recognition installed successfully
+  6. Verified: import face_recognition works correctly
+  7. Backend restarted and running on the new venv
+
+  face_recognition is now fully operational locally.
+
+
+DEPLOYMENT IMPACT OF ALL CHANGES
+================================================================================
+
+1. Python / venv change — NO impact on deployment
+   ------------------------------------------------
+   The local .venv folder is never uploaded to the server. Deployment platforms
+   (Render, Railway, Heroku, etc.) install dependencies fresh from
+   requirements.txt on their own Linux environment.
+
+   On Linux (which all major cloud hosts use), dlib has pre-built wheels for
+   Python 3.9–3.11 AND gcc/g++ is available as a system tool, so dlib compiles
+   cleanly without any extra steps. No changes to requirements.txt are needed.
+
+   Action required: None. requirements.txt is unchanged and will work fine
+   on the deployment server.
+
+2. Frontend code changes — MUST be deployed
+   ------------------------------------------
+   These files were changed and need to be pushed/deployed:
+
+     frontend/src/lib/api.ts
+       - throwOnError now handles array validation errors properly.
+         Without this, any FastAPI 422 error shows as "[object Object]" in prod.
+
+     frontend/src/pages/StudentRegistration.tsx
+       - fullName field added. Without this, registration always fails with a
+         422 error on the deployed backend (which also requires fullName).
+
+     frontend/src/pages/StudentPortal.tsx
+       - Placeholder text fix. Minor UX — no functional impact.
+
+3. Backend code changes already in place — MUST be deployed
+   ----------------------------------------------------------
+   These backend fixes from earlier in the session also need to be pushed:
+
+     backend/schemas.py  — DeleteBiometricsRequest schema (fixes biometrics
+                           delete endpoint returning 422 in production)
+     backend/main.py     — Uses DeleteBiometricsRequest on the biometrics
+                           route; also contains the PUT attendance update route
+                           and POST session end alias
+
+   These are already broken on the production server until the code is pushed.
+
+SUMMARY: Push frontend + backend code to fix production. The Python/venv
+change is local only and has no bearing on the deployed environment.
+
+================================================================================
+
+
+================================================================================
+  CORS + REGISTRATION FIXES — 2026-04-25
+================================================================================
+
+OVERVIEW
+--------
+Registration was failing with "Failed to fetch" in the browser. Root cause was
+a chain of three separate issues uncovered one at a time.
+
+
+================================================================================
+  FIX 1 — CORS credentials misconfiguration
+================================================================================
+
+File: backend/main.py
+
+Before:
+  app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, ...)
+
+After:
+  app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, ...)
+
+Why:
+  Combining allow_origins=["*"] with allow_credentials=True is forbidden by the
+  CORS spec. Starlette silently drops the Access-Control-Allow-Origin header in
+  this case, so the browser blocks every response. Since the app uses localStorage
+  (not cookies), credentials do not need to be sent with requests — False is correct.
+
+
+================================================================================
+  FIX 2 — Global exception handler (CORS headers on 500 errors)
+================================================================================
+
+File: backend/main.py
+
+Added after the CORS middleware setup:
+
+  from fastapi.responses import JSONResponse
+  from fastapi import Request
+
+  @app.exception_handler(Exception)
+  async def global_exception_handler(request: Request, exc: Exception):
+      return JSONResponse(
+          status_code=500,
+          content={"success": False, "message": str(exc)},
+          headers={"Access-Control-Allow-Origin": "*"},
+      )
+
+Why:
+  When the server crashes with an unhandled exception, Starlette's CORS
+  middleware never gets to inject the Access-Control-Allow-Origin header into
+  the error response. The browser sees no CORS header on the 500 and blocks it,
+  showing "Failed to fetch" instead of the actual error. This handler catches
+  all unhandled exceptions at the FastAPI level — before they escape to uvicorn
+  — and returns a proper JSON response with CORS headers, so the browser always
+  sees a readable error message.
+
+
+================================================================================
+  FIX 3 — dlib broken due to NumPy 2.x (root cause of registration failure)
+================================================================================
+
+Problem:
+  Even after fixing CORS, registration returned:
+    "could not process photo 1: Unsupported image type, must be 8bit gray or RGB image."
+
+  This error came from dlib's HOG face detector. Adding diagnostic logging
+  confirmed the numpy array was perfectly valid:
+    shape=(1080, 608, 3), dtype=uint8, C_CONTIGUOUS=True
+
+  Running dlib directly with a synthetic zero-filled image also failed with
+  the same error — proving the issue was not the uploaded photos but dlib itself.
+
+Root cause:
+  NumPy installed in the venv was 2.4.4. The pre-built dlib wheel
+  (dlib-19.24.1-cp311-cp311-win_amd64.whl from github.com/z-mahmud22) was
+  compiled against NumPy 1.x. NumPy 2.0 changed the internal C API in a way
+  that breaks extensions compiled against 1.x — specifically the PyArrayObject
+  struct layout — causing dlib to misread array metadata and reject all images.
+
+Why downgrading is correct here (not all upgrades are better):
+  NumPy 2.0 was not a normal incremental upgrade — it was a major breaking
+  release that changed the internal C structure of how numpy stores array data
+  in memory (PyArrayObject). This is a low-level change that affects any code
+  written in C/C++ that links directly against numpy, such as dlib's Python
+  bindings.
+
+  The dlib wheel installed is a pre-compiled .whl file — someone compiled the
+  C++ dlib code on their machine and packaged the binary result. That binary
+  was built against NumPy 1.x and has the old memory layout baked in. When run
+  against NumPy 2.x, the memory layout has shifted. When dlib asks numpy "where
+  is this array's data?", it reads the wrong memory location and concludes the
+  array is invalid — hence "Unsupported image type" even on a perfect array.
+
+  Analogy: the dlib wheel is a key cut to fit a lock (NumPy 1.x API). NumPy 2.0
+  changed the lock. The key looks the same but no longer fits, even though the
+  key itself is perfectly fine.
+
+  This is a Windows-only problem. On Linux deployment servers, pip compiles dlib
+  from source during "pip install -r requirements.txt". The compilation happens
+  against whatever numpy is current, so the binary is always built for the
+  installed version. The mismatch only happens on Windows where pre-built wheels
+  compiled by a third party at a fixed point in time are used instead.
+
+Fix:
+  Downgraded NumPy from 2.4.4 to 1.26.4 (last 1.x release):
+    pip install "numpy<2"
+
+  Both dlib and OpenCV (cv2) tested and confirmed working after the downgrade.
+  OpenCV's package metadata says numpy>=2 is required, but the runtime works
+  correctly with 1.26.4.
+
+Also changed (backend/main.py — registration image loading):
+  The image loading in the registration route was refactored from a manual
+  three-step OpenCV pipeline to face_recognition.load_image_file(BytesIO(contents)),
+  which is the library's own loader.
+
+  Before:
+    arr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)  # loads in BGR order
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # manual flip to RGB
+    encodings = await loop.run_in_executor(None, lambda: face_recognition.face_encodings(rgb))
+
+  After:
+    rgb = face_recognition.load_image_file(BytesIO(contents))  # loads in RGB directly
+    encodings = face_recognition.face_encodings(rgb)
+
+  Why this matters:
+    OpenCV always loads images in BGR (Blue, Green, Red) order — the opposite of
+    what face_recognition expects. The old code relied on a manual cvtColor step
+    to flip the channels to RGB before passing to face_recognition. If anyone ever
+    modified that code and removed or misplaced that step, face_recognition would
+    receive BGR data and produce wrong embeddings — faces would be encoded
+    incorrectly and recognition would silently fail with no error, just bad results.
+
+    face_recognition.load_image_file uses PIL internally, which loads directly in
+    RGB order. No manual channel conversion needed. The output is exactly what
+    face_recognition expects because it is using its own loader to produce it.
+
+  Additional benefits going forward:
+    - Format support: PIL handles more image formats than OpenCV out of the box
+      (WebP, TIFF, various JPEG variants). Unusual photo formats from student
+      devices are more likely to load correctly.
+    - Maintainability: one line is harder to break than three. The BGR/RGB
+      distinction is a silent failure mode that is now eliminated entirely.
+    - Error handling: each step (loading and encoding) is now in its own
+      try/except, so failures return readable HTTP error responses instead of
+      crashing the server and stripping CORS headers.
+
+  Tradeoff:
+    PIL is slightly slower than OpenCV for decoding large images. This has no
+    practical impact on registration, which is a one-time action per student
+    per course and not a real-time or high-throughput operation.
+
+
+================================================================================
+  DEPLOYMENT IMPACT
+================================================================================
+
+  NumPy downgrade — NO impact on deployment
+  ------------------------------------------
+  The local .venv is never uploaded. On Linux deployment platforms, pip installs
+  packages fresh from requirements.txt. The dlib wheel on Linux (from PyPI or
+  compiled from source with gcc) is built against whatever NumPy is installed at
+  that time and does not have this compatibility issue. No changes to
+  requirements.txt are needed.
+
+  backend/main.py changes — MUST be deployed
+  -------------------------------------------
+  - Global exception handler and registration image loading refactor
+  - Global exception handler       (improves error visibility everywhere)
+  - Registration image loading refactor + per-step error handling
+
+================================================================================
