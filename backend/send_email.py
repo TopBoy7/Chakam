@@ -1,36 +1,29 @@
 import os
 import json
-import smtplib
 import logging
 import urllib.request
 import urllib.error
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Sends email two ways, in priority order:
+    """Sends email EXCLUSIVELY through the external HTTP mailer API (MAILER_URL).
 
-    1. Via the external HTTP mailer API (MAILER_URL) — required on hosts that
-       block outbound SMTP (e.g. Render's free tier). Uses only the stdlib so
-       both backends stay dependency-light.
-    2. Direct SMTP (Gmail) as a fallback — works where SMTP is allowed
-       (e.g. the Azure VM, or local dev).
+    There is no direct-SMTP path: some hosts (e.g. Render's free tier) block
+    outbound SMTP, and we want one consistent behaviour everywhere. The mailer
+    service (the `mailer/` Next.js app) does the actual SMTP sending.
 
-    Shared by both main.py and main-light.py via EmailService, so the two
-    backends behave identically.
+    Shared by both main.py and main-light.py, so the two backends behave
+    identically. Uses only the standard library — no extra dependencies.
     """
 
-    # ---------------------------------------------------------------
-    # Transport 1: external HTTP mailer API
-    # ---------------------------------------------------------------
     @staticmethod
     def _send_via_api(to_email: str, subject: str, body: str) -> bool:
         url = os.getenv("MAILER_URL")
         if not url:
-            return False  # not configured — caller falls back to SMTP
+            logger.error("MAILER_URL is not set — email cannot be sent (API-only).")
+            return False
 
         payload = json.dumps({"to": to_email, "subject": subject, "body": body}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -52,48 +45,11 @@ class EmailService:
             logger.exception("Mailer API request failed: %s", e)
             return False
 
-    # ---------------------------------------------------------------
-    # Transport 2: direct SMTP (fallback)
-    # ---------------------------------------------------------------
-    @staticmethod
-    def _send_via_smtp(to_email: str, subject: str, body: str, html: bool = True) -> bool:
-        sender = os.getenv("SMTP_EMAIL")
-        password = os.getenv("SMTP_PASSWORD")
-        if not sender or not password:
-            logger.error("SMTP not configured (SMTP_EMAIL / SMTP_PASSWORD missing)")
-            return False
-        try:
-            msg = MIMEMultipart() if html else MIMEText(body, "plain")
-            msg["From"] = sender
-            msg["To"] = to_email
-            msg["Subject"] = subject
-            if html:
-                msg.attach(MIMEText(body, "html"))
-            else:
-                msg.attach(MIMEText(body, "plain"))
-            server = smtplib.SMTP("smtp.gmail.com", 587, timeout=30)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(sender, password)
-            server.send_message(msg)
-            server.quit()
-            return True
-        except Exception as e:
-            logger.exception(f"Error sending email via SMTP: {e}")
-            return False
-
-    # ---------------------------------------------------------------
-    # Public API
-    # ---------------------------------------------------------------
     @staticmethod
     def send_email(to_email: str, subject: str, body: str, html: bool = True) -> bool:
-        """Try the HTTP mailer API first (if MAILER_URL is set), then SMTP."""
-        if os.getenv("MAILER_URL"):
-            if EmailService._send_via_api(to_email, subject, body):
-                return True
-            logger.warning("Mailer API failed — falling back to direct SMTP")
-        return EmailService._send_via_smtp(to_email, subject, body, html=html)
+        """Send an email via the mailer API. Returns True on success.
+        `html` is kept for signature compatibility; the mailer always sends HTML."""
+        return EmailService._send_via_api(to_email, subject, body)
 
     @staticmethod
     def send_occupancy_alert(

@@ -1,8 +1,9 @@
-"""Tests for the EmailService transport selection (HTTP mailer API vs SMTP)."""
+"""Tests for EmailService — email is sent ONLY via the HTTP mailer API (no SMTP)."""
+import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
@@ -13,34 +14,28 @@ from send_email import EmailService  # noqa: E402
 
 
 class EmailTransportTests(unittest.TestCase):
-    def test_uses_api_when_mailer_url_set(self):
-        with patch.dict("os.environ", {"MAILER_URL": "https://mail.example.com/api/send",
-                                       "MAILER_SECRET": "s3cret"}, clear=False), \
-             patch.object(EmailService, "_send_via_api", return_value=True) as api, \
-             patch.object(EmailService, "_send_via_smtp", return_value=True) as smtp:
-            ok = EmailService.send_email("to@x.com", "subj", "<b>hi</b>")
-        self.assertTrue(ok)
-        api.assert_called_once()
-        smtp.assert_not_called()  # API succeeded → SMTP not attempted
-
-    def test_falls_back_to_smtp_when_api_fails(self):
+    def test_send_email_calls_api(self):
         with patch.dict("os.environ", {"MAILER_URL": "https://mail.example.com/api/send"}, clear=False), \
-             patch.object(EmailService, "_send_via_api", return_value=False) as api, \
-             patch.object(EmailService, "_send_via_smtp", return_value=True) as smtp:
+             patch.object(EmailService, "_send_via_api", return_value=True) as api:
             ok = EmailService.send_email("to@x.com", "subj", "<b>hi</b>")
         self.assertTrue(ok)
-        api.assert_called_once()
-        smtp.assert_called_once()
+        api.assert_called_once_with("to@x.com", "subj", "<b>hi</b>")
 
-    def test_uses_smtp_when_no_mailer_url(self):
-        env = {k: v for k, v in __import__("os").environ.items() if k != "MAILER_URL"}
-        with patch.dict("os.environ", env, clear=True), \
-             patch.object(EmailService, "_send_via_api", return_value=True) as api, \
-             patch.object(EmailService, "_send_via_smtp", return_value=True) as smtp:
+    def test_returns_false_when_api_fails(self):
+        with patch.dict("os.environ", {"MAILER_URL": "https://mail.example.com/api/send"}, clear=False), \
+             patch.object(EmailService, "_send_via_api", return_value=False):
             ok = EmailService.send_email("to@x.com", "subj", "<b>hi</b>")
-        self.assertTrue(ok)
-        api.assert_not_called()
-        smtp.assert_called_once()
+        self.assertFalse(ok)
+
+    def test_returns_false_when_no_mailer_url(self):
+        env = {k: v for k, v in os.environ.items() if k != "MAILER_URL"}
+        with patch.dict("os.environ", env, clear=True):
+            ok = EmailService.send_email("to@x.com", "subj", "<b>hi</b>")
+        self.assertFalse(ok)  # no MAILER_URL -> cannot send, no SMTP fallback
+
+    def test_no_smtp_path_exists(self):
+        # Guard: the SMTP transport must be gone.
+        self.assertFalse(hasattr(EmailService, "_send_via_smtp"))
 
     def test_send_via_api_posts_with_secret_header(self):
         captured = {}
