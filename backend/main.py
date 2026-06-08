@@ -106,6 +106,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/healthz")
+async def healthz():
+    """Health probe for the Azure load balancer / uptime monitor."""
+    return {
+        "status": "ok",
+        "service": "smart-classroom-api",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
 # -------------------------------------------------------
 # WEBSOCKET ENDPOINT
 # -------------------------------------------------------

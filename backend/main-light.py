@@ -35,6 +35,53 @@ logger = logging.getLogger("smart-classroom-proxy")
 
 
 # -------------------------------------------------------
+# HEAVY-BACKEND FORWARDING
+# These three endpoints (image upload + the two face-registration routes)
+# require the heavy dependencies (YOLO + face_recognition) that only the
+# Azure backend carries. We forward them and relay the heavy backend's
+# response *verbatim* so that, from the frontend's perspective, talking to
+# this light backend is indistinguishable from talking to the heavy one.
+# -------------------------------------------------------
+class HeavyBackendUnavailable(Exception):
+    """Raised only on a transport-level failure (heavy backend down / unreachable
+    / timed out). HTTP error *responses* (4xx/5xx) are NOT transport failures —
+    they are relayed back to the caller unchanged."""
+
+
+def _extract_detail(body: dict, fallback: str) -> str:
+    """Pull a human message out of a heavy-backend error body.
+    FastAPI HTTPExceptions serialize as {"detail": ...}; our ResponseModel
+    errors use {"message": ...}. Support both."""
+    if isinstance(body, dict):
+        return body.get("detail") or body.get("message") or fallback
+    return fallback
+
+
+async def _forward_multipart_to_heavy(path: str, data: dict, files: list, timeout: float = 60.0):
+    """POST a multipart request to the heavy backend.
+    Returns (status_code, json_body). Raises HeavyBackendUnavailable only when
+    the heavy backend cannot be reached at all."""
+    url = f"{HEAVY_BACKEND_URL}{path}"
+    logger.info("Forwarding multipart -> %s", url)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, data=data, files=files)
+    except httpx.RequestError as e:  # connection refused, DNS, timeout, etc.
+        logger.exception("Heavy backend unreachable at %s: %s", url, e)
+        raise HeavyBackendUnavailable(str(e))
+
+    try:
+        body = resp.json()
+    except Exception:
+        body = {
+            "success": False,
+            "message": resp.text or "invalid response from analytics server",
+            "data": None,
+        }
+    return resp.status_code, body
+
+
+# -------------------------------------------------------
 # HELPERS
 # -------------------------------------------------------
 def serialize(obj):
@@ -87,7 +134,7 @@ app = FastAPI(title="Smart Classroom (lightweight proxy)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -256,72 +303,78 @@ async def upload_image(
         raise HTTPException(400, "deviceId mismatch")
 
     contents = await file.read()
-    forward_url = f"{HEAVY_BACKEND_URL}/classrooms/{classId}/image"
-    logger.info("Forwarding image to heavy backend %s", forward_url)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            files = {"file": (file.filename or "upload.jpg", contents, file.content_type)}
-            data = {"deviceId": deviceId}
-            resp = await client.post(forward_url, data=data, files=files)
-
-        resp.raise_for_status()
-        resp_json = resp.json()
-
-        classroom_payload = resp_json.get("data", {}).get("classroom")
-
-        if classroom_payload:
-            if "_id" in classroom_payload:
-                classroom_payload["_id"] = str(classroom_payload["_id"])
-
-            for dt_key in ("createdAt", "updatedAt"):
-                if classroom_payload.get(dt_key):
-                    if isinstance(classroom_payload[dt_key], datetime):
-                        classroom_payload[dt_key] = classroom_payload[dt_key].isoformat()
-
-            await manager.broadcast(serialize({
-                "event": "classroom_image_update",
-                "classroom": classroom_payload
-            }))
-
-            occupancy_after = classroom_payload.get("occupancy")
-            capacity_after = classroom_payload.get("capacity")
-            class_name = classroom_payload.get("className") or "Unknown Classroom"
-
-            if (
-                occupancy_after is not None
-                and capacity_after is not None
-                and occupancy_after > capacity_after
-            ):
-                print("Exceeded after image upload!")
-                background_tasks.add_task(
-                    EmailService.send_occupancy_alert,
-                    to_email="okefejoseph9@gmail.com",
-                    class_id=classId,
-                    class_name=class_name,
-                    occupancy=occupancy_after,
-                    capacity=capacity_after,
-                )
-
-        # Also forward attendance_update broadcast if present in response
-        attendance_payload = resp_json.get("data", {}).get("attendance")
-        if attendance_payload and attendance_payload.get("newlyMarked"):
-            await manager.broadcast(serialize({
-                "event": "attendance_update",
-                "sessionId": attendance_payload.get("sessionId"),
-                "courseCode": attendance_payload.get("courseCode"),
-                "newlyMarked": attendance_payload.get("newlyMarked"),
-            }))
-
-        return resp_json
-
-    except Exception as e:
-        logger.exception("Heavy backend unavailable or error occurred: %s", e)
+        files = {"file": (file.filename or "upload.jpg", contents, file.content_type or "image/jpeg")}
+        data = {"deviceId": deviceId}
+        status_code, resp_json = await _forward_multipart_to_heavy(
+            f"/classrooms/{classId}/image", data, files, timeout=30.0
+        )
+    except HeavyBackendUnavailable:
+        # Transport failure — heavy backend is off. Degrade gracefully so the
+        # ESP32-CAM keeps running instead of restarting on an HTTP error.
         return schemas.ResponseModel(
             success=False,
             message="image analytics server currently unavailable",
-            data=None
+            data=None,
         ).model_dump()
+
+    # Heavy backend responded but with an error (bad image, etc.) — relay it.
+    if status_code >= 400:
+        return schemas.ResponseModel(
+            success=False,
+            message=_extract_detail(resp_json, "image analytics failed"),
+            data=None,
+        ).model_dump()
+
+    # Success — re-broadcast the heavy backend's result to our own WS clients,
+    # because the frontend is connected to THIS server's websocket, not Azure's.
+    classroom_payload = (resp_json.get("data") or {}).get("classroom")
+
+    if classroom_payload:
+        if "_id" in classroom_payload:
+            classroom_payload["_id"] = str(classroom_payload["_id"])
+
+        for dt_key in ("createdAt", "updatedAt"):
+            if classroom_payload.get(dt_key):
+                if isinstance(classroom_payload[dt_key], datetime):
+                    classroom_payload[dt_key] = classroom_payload[dt_key].isoformat()
+
+        await manager.broadcast(serialize({
+            "event": "classroom_image_update",
+            "classroom": classroom_payload
+        }))
+
+        occupancy_after = classroom_payload.get("occupancy")
+        capacity_after = classroom_payload.get("capacity")
+        class_name = classroom_payload.get("className") or "Unknown Classroom"
+
+        if (
+            occupancy_after is not None
+            and capacity_after is not None
+            and occupancy_after > capacity_after
+        ):
+            print("Exceeded after image upload!")
+            background_tasks.add_task(
+                EmailService.send_occupancy_alert,
+                to_email="okefejoseph9@gmail.com",
+                class_id=classId,
+                class_name=class_name,
+                occupancy=occupancy_after,
+                capacity=capacity_after,
+            )
+
+    # Also forward attendance_update broadcast if present in response
+    attendance_payload = (resp_json.get("data") or {}).get("attendance")
+    if attendance_payload and attendance_payload.get("newlyMarked"):
+        await manager.broadcast(serialize({
+            "event": "attendance_update",
+            "sessionId": attendance_payload.get("sessionId"),
+            "courseCode": attendance_payload.get("courseCode"),
+            "newlyMarked": attendance_payload.get("newlyMarked"),
+        }))
+
+    return resp_json
 
 
 # -------------------------------------------------------
@@ -468,23 +521,22 @@ async def register_student(
         contents = await photo.read()
         contents_list.append((photo.filename or "photo.jpg", contents, photo.content_type or "image/jpeg"))
 
+    files = [("photos", item) for item in contents_list]
+    data = {"matricNumber": matricNumber, "fullName": fullName}
+
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            files = [("photos", item) for item in contents_list]
-            data = {"matricNumber": matricNumber, "fullName": fullName}
-            resp = await client.post(
-                f"{HEAVY_BACKEND_URL}/students/register",
-                data=data,
-                files=files,
-            )
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logger.exception("Heavy backend error during student registration: %s", e)
+        status_code, body = await _forward_multipart_to_heavy("/students/register", data, files)
+    except HeavyBackendUnavailable:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "face recognition service currently unavailable",
         )
+
+    # Relay the heavy backend's response verbatim — including its 4xx errors —
+    # so the frontend sees the exact same behaviour as calling the heavy backend.
+    if status_code >= 400:
+        raise HTTPException(status_code, _extract_detail(body, "student registration failed"))
+    return body
 
 
 @app.get("/students", response_model=schemas.ResponseModel)
@@ -610,6 +662,7 @@ async def start_session(req: schemas.StartSessionRequest):
         sessionId=str(uuid.uuid4()),
         courseCode=req.courseCode,
         classId=req.classId,
+        classroomName=classroom.className,
     )
     inserted_id = await database.add_session(session)
 
@@ -776,36 +829,38 @@ async def register_student_for_course(
         contents = await photo.read()
         contents_list.append((photo.filename or "photo.jpg", contents, photo.content_type or "image/jpeg"))
 
+    files = [("photos", item) for item in contents_list]
+    data = {
+        "matricNumber": matricNumber,
+        "fullName": fullName,
+        "biometricConsent": biometricConsent,
+        "manualAltConsent": manualAltConsent,
+        "ageConsent": ageConsent,
+    }
+
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            files = [("photos", item) for item in contents_list]
-            data = {
-                "matricNumber": matricNumber,
-                "fullName": fullName,
-                "biometricConsent": biometricConsent,
-                "manualAltConsent": manualAltConsent,
-                "ageConsent": ageConsent,
-            }
-            resp = await client.post(
-                f"{HEAVY_BACKEND_URL}/courses/{courseCode}/register",
-                data=data,
-                files=files,
-            )
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        logger.exception("Heavy backend error during course registration: %s", e)
+        status_code, body = await _forward_multipart_to_heavy(
+            f"/courses/{courseCode}/register", data, files
+        )
+    except HeavyBackendUnavailable:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "face recognition service currently unavailable",
         )
+
+    # Relay verbatim — consent errors (422), duplicate (409), no-face (422),
+    # too-many-photos (400) all reach the frontend exactly as the heavy backend
+    # would have returned them.
+    if status_code >= 400:
+        raise HTTPException(status_code, _extract_detail(body, "registration failed"))
+    return body
 
 
 # -------------------------------------------------------
 # COURSE-SCOPED BIOMETRICS DELETION
 # -------------------------------------------------------
 @app.delete("/courses/{courseCode}/students/biometrics", response_model=schemas.ResponseModel)
-async def delete_course_student_biometrics(courseCode: str, req: schemas.ManualAttendanceRequest):
+async def delete_course_student_biometrics(courseCode: str, req: schemas.DeleteBiometricsRequest):
     matric = req.matricNumber.strip().upper()
     ok = await database.delete_student_embeddings_for_course(courseCode, matric)
     if not ok:
@@ -840,7 +895,11 @@ async def update_student_attendance(sessionId: str, matricNumber: str, req: dict
     if not session:
         raise HTTPException(404, "session not found")
 
-    present = req.get("status") == "present"
+    status_value = req.get("status")
+    if status_value not in {"present", "absent"}:
+        raise HTTPException(400, "status must be 'present' or 'absent'")
+
+    present = status_value == "present"
     student = await database.get_student_by_matric(matricNumber)
     full_name = student.fullName if student else matricNumber
 

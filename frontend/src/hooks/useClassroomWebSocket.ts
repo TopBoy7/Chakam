@@ -56,8 +56,6 @@ export const useClassroomWebSocket = (onMessage: WSMessageHandler) => {
       };
 
       ws.onmessage = (ev) => {
-        console.log('hmm');
-        
         try {
           const data = JSON.parse(ev.data);
           console.info("[WS] message", data.event ?? data);
