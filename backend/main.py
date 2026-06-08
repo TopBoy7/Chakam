@@ -1,6 +1,7 @@
 from fastapi import (
     FastAPI, HTTPException, status,
-    UploadFile, File, Form, Response, WebSocket, WebSocketDisconnect, Query
+    UploadFile, File, Form, Response, WebSocket, WebSocketDisconnect, Query,
+    BackgroundTasks
 )
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from typing import List, Optional
 from io import BytesIO
+import os
 import cv2
 import numpy as np
 import logging
@@ -16,6 +18,11 @@ import time
 import uuid
 
 import database, models, schemas, env
+from send_email import EmailService
+
+
+# Who receives capacity-exceeded alerts. Override with the ALERT_EMAIL env var.
+ALERT_EMAIL = os.getenv("ALERT_EMAIL", "okefejoseph9@gmail.com")
 
 from ultralytics import YOLO
 import cloudinary
@@ -191,7 +198,11 @@ async def get_classroom(classId: str):
 # UPDATE CLASSROOM
 # -------------------------------------------------------
 @app.put("/classrooms/{classId}", response_model=schemas.ResponseModel)
-async def update_classroom(classId: str, req: schemas.UpdateClassroomRequest):
+async def update_classroom(
+    classId: str,
+    req: schemas.UpdateClassroomRequest,
+    background_tasks: BackgroundTasks,
+):
     payload = {k: v for k, v in req.model_dump().items() if v is not None}
     existing = await database.get_classroom_by_classId(classId)
     if not existing:
@@ -218,6 +229,27 @@ async def update_classroom(classId: str, req: schemas.UpdateClassroomRequest):
                 pass
 
     await manager.broadcast(serialize({"event": "classroom_updated", "classroom": updated_dict}))
+
+    try:
+        occupancy_after = updated.occupancy
+        capacity_after = updated.capacity
+        class_name = updated_dict.get("className") or "Unknown Classroom"
+
+        if (
+            occupancy_after is not None
+            and capacity_after is not None
+            and occupancy_after > capacity_after
+        ):
+            background_tasks.add_task(
+                EmailService.send_occupancy_alert,
+                to_email=ALERT_EMAIL,
+                class_id=classId,
+                class_name=class_name,
+                occupancy=occupancy_after,
+                capacity=capacity_after,
+            )
+    except Exception as e:
+        logger.exception("Failed to schedule occupancy alert email: %s", e)
 
     return {
         "success": True,
@@ -246,7 +278,12 @@ async def delete_classroom(classId: str):
 # YOLO + FACE RECOGNITION IMAGE ENDPOINT
 # -------------------------------------------------------
 @app.post("/classrooms/{classId}/image", response_model=schemas.ResponseModel)
-async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile = File(...)):
+async def upload_image(
+    classId: str,
+    background_tasks: BackgroundTasks,
+    deviceId: str = Form(...),
+    file: UploadFile = File(...),
+):
     t_total_start = time.perf_counter()
 
     classroom = await database.get_classroom_by_classId(classId)
@@ -395,6 +432,21 @@ async def upload_image(classId: str, deviceId: str = Form(...), file: UploadFile
                 updated_dict[dt_key] = updated_dict[dt_key].isoformat()
             except Exception:
                 pass
+
+    # Capacity alert: fire when MORE people are detected than the room allows.
+    # (occupancy is stored capped at capacity, so we compare the raw detected count.)
+    try:
+        if person_count > classroom.capacity:
+            background_tasks.add_task(
+                EmailService.send_occupancy_alert,
+                to_email=ALERT_EMAIL,
+                class_id=classId,
+                class_name=classroom.className or "Unknown Classroom",
+                occupancy=person_count,
+                capacity=classroom.capacity,
+            )
+    except Exception as e:
+        logger.exception("Failed to schedule occupancy alert email: %s", e)
 
     # Broadcast classroom update
     t_ws_start = time.perf_counter()

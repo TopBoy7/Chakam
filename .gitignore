@@ -9,6 +9,7 @@ backend/evaluation/
 CHANGES_AND_TESTING.md
 AZURE_HOSTING_GUIDE.md
 AZURE_DEPLOY_FROM_DNS.md
+EMAIL_SETUP.md
 chakam-vm-steps.txt
 chakam-azure-steps-full.txt
 chakam-check-and-update.txt

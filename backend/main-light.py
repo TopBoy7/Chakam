@@ -30,6 +30,9 @@ import database, models, schemas, env
 # -------------------------------------------------------
 HEAVY_BACKEND_URL = os.getenv("HEAVY_BACKEND_URL", "http://51.107.0.26").rstrip("/")
 
+# Who receives capacity-exceeded alerts. Override with the ALERT_EMAIL env var.
+ALERT_EMAIL = os.getenv("ALERT_EMAIL", "okefejoseph9@gmail.com")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smart-classroom-proxy")
 
@@ -260,7 +263,7 @@ async def update_classroom(
             print("Exceeded!")
             background_tasks.add_task(
                 EmailService.send_occupancy_alert,
-                to_email="okefejoseph9@gmail.com",
+                to_email=ALERT_EMAIL,
                 class_id=classId,
                 class_name=class_name,
                 occupancy=occupancy_after,
@@ -357,7 +360,7 @@ async def upload_image(
             print("Exceeded after image upload!")
             background_tasks.add_task(
                 EmailService.send_occupancy_alert,
-                to_email="okefejoseph9@gmail.com",
+                to_email=ALERT_EMAIL,
                 class_id=classId,
                 class_name=class_name,
                 occupancy=occupancy_after,
