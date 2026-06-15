@@ -9,7 +9,7 @@ const char* ssid = "Electrify_labs";
 const char* password = "12345678";
 
 // ================= API =================
-const char* serverUrl = "http://51.107.0.26/classrooms/COMP-LAB/image";
+const char* serverUrl = "https://chakam-backend.onrender.com/classrooms/COMP-LAB/image";
 const char* deviceId = "dev-00134";
 
 // ================= LOCAL AP STREAM =================
