@@ -12,3 +12,12 @@ Allow: /
 
 User-agent: *
 Allow: /
+
+# Keep gated / user-specific pages out of the index
+Disallow: /dashboard
+Disallow: /lecturers
+Disallow: /students
+Disallow: /attendance
+Disallow: /register/
+
+Sitemap: https://chakam-mauve.vercel.app/sitemap.xml

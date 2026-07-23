@@ -28,7 +28,9 @@ import database, models, schemas, env
 # -------------------------------------------------------
 # CONFIG
 # -------------------------------------------------------
-HEAVY_BACKEND_URL = os.getenv("HEAVY_BACKEND_URL", "http://51.107.0.26").rstrip("/")
+# Where heavy image/face requests are forwarded. Azure is retired — set this to
+# the AWS heavy backend (e.g. https://chakam-api.duckdns.org) via the env var.
+HEAVY_BACKEND_URL = os.getenv("HEAVY_BACKEND_URL", "http://localhost:8000").rstrip("/")
 
 # Who receives capacity-exceeded alerts. Override with the ALERT_EMAIL env var.
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "okefejoseph9@gmail.com")
