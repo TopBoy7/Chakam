@@ -9,3 +9,7 @@ python-dotenv
 cloudinary
 websockets
 face_recognition
+face_recognition_models
+# face_recognition_models still imports pkg_resources, which setuptools 81+ removed.
+# Pin below 81 so `import face_recognition` doesn't crash on Python 3.12 (Ubuntu 24.04).
+setuptools<81
