@@ -44,6 +44,50 @@ logger = logging.getLogger("smart-classroom")
 
 
 # -------------------------------------------------------
+# ROBUST FACE ENCODING (registration)
+# -------------------------------------------------------
+def extract_face_encodings(contents: bytes):
+    """Extract face encodings from raw image bytes, tolerant of the two things
+    that most often cause a false 'no face detected' on a photo that clearly has
+    a face:
+
+      1. Phone-photo EXIF rotation — the pixels are stored sideways with an
+         orientation flag; face_recognition/OpenCV ignore that flag, so the
+         detector sees a rotated face and misses it. We apply exif_transpose.
+      2. The default HOG detector being too weak for smaller / slightly angled
+         faces. We retry with more upsampling, then fall back to the CNN model.
+
+    Runs synchronously (CPU-bound) — call it via run_in_executor.
+    Returns a list of 128-float encodings (empty if truly no face).
+    """
+    import face_recognition
+    from PIL import Image, ImageOps
+
+    img = Image.open(BytesIO(contents))
+    img = ImageOps.exif_transpose(img)          # honour phone orientation
+    img = img.convert("RGB")
+
+    # Cap very large uploads so detection stays fast and consistent.
+    if max(img.size) > 1600:
+        img.thumbnail((1600, 1600))
+
+    rgb = np.array(img)
+
+    # Progressive detection: cheap HOG first, then more upsampling, then CNN.
+    for model, upsample in (("hog", 1), ("hog", 2), ("cnn", 1)):
+        try:
+            locations = face_recognition.face_locations(
+                rgb, number_of_times_to_upsample=upsample, model=model
+            )
+        except Exception:
+            locations = []
+        if locations:
+            return face_recognition.face_encodings(rgb, known_face_locations=locations)
+
+    return []
+
+
+# -------------------------------------------------------
 # GLOBAL WEBSOCKET MANAGER
 # -------------------------------------------------------
 
@@ -658,23 +702,19 @@ async def register_student(
 
     for i, photo in enumerate(photos):
         contents = await photo.read()
-        arr = np.frombuffer(contents, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
-        if img is None:
-            raise HTTPException(400, f"invalid image in photo {i + 1}")
-
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        encodings = await loop.run_in_executor(
-            None, lambda rgb=rgb: face_recognition.face_encodings(rgb)
-        )
+        try:
+            encodings = await loop.run_in_executor(
+                None, lambda c=contents: extract_face_encodings(c)
+            )
+        except Exception as exc:
+            raise HTTPException(400, f"could not process photo {i + 1}: {exc}")
 
         if not encodings:
             raise HTTPException(422, f"no face detected in photo {i + 1}")
 
         embeddings.append(encodings[0].tolist())
-        # img / rgb go out of scope here — never written to disk or cloud
+        # contents / decoded image go out of scope here — never written to disk or cloud
 
     student = models.Student(
         matricNumber=matricNumber,
@@ -1016,18 +1056,18 @@ async def register_student_for_course(
             "face recognition service not available on this server",
         )
 
+    import asyncio
+    loop = asyncio.get_running_loop()
+
     embeddings: List[List[float]] = []
     for i, photo in enumerate(photos):
         contents = await photo.read()
         try:
-            rgb = face_recognition.load_image_file(BytesIO(contents))
-        except Exception as load_exc:
-            raise HTTPException(400, f"invalid image in photo {i + 1}: {load_exc}")
-        logging.warning(f"[reg] photo {i+1}: shape={rgb.shape} dtype={rgb.dtype} C_CONTIGUOUS={rgb.flags['C_CONTIGUOUS']} len_bytes={len(contents)}")
-        try:
-            encodings = face_recognition.face_encodings(rgb)
+            encodings = await loop.run_in_executor(
+                None, lambda c=contents: extract_face_encodings(c)
+            )
         except Exception as exc:
-            raise HTTPException(422, f"could not process photo {i + 1}: {exc}")
+            raise HTTPException(400, f"could not process photo {i + 1}: {exc}")
         if not encodings:
             raise HTTPException(422, f"no face detected in photo {i + 1}")
         embeddings.append(encodings[0].tolist())
