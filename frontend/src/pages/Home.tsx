@@ -1,15 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { Activity, BarChart3, ClipboardList, ArrowRight, LogIn, LogOut } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -68,11 +58,7 @@ const stats = [
 
 /* ======================================================================== */
 const Home = () => {
-  const { user, login, logout } = useAuth();
-  const navigate = useNavigate();
-  const [password, setPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   const heroRef    = useReveal();
   const statsRef   = useReveal();
@@ -81,18 +67,6 @@ const Home = () => {
   const feat3Ref   = useReveal();
   const footerRef  = useReveal();
   const featRefs   = [feat1Ref, feat2Ref, feat3Ref];
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (login(password)) {
-      setLoginError("");
-      setPassword("");
-      setDialogOpen(false);
-      navigate("/dashboard");
-    } else {
-      setLoginError("Incorrect password");
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
@@ -136,57 +110,13 @@ const Home = () => {
                 Sign Out
               </button>
             ) : (
-              <>
-                <Link
-                  to="/login"
-                  className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
-                >
-                  <LogIn className="h-4 w-4" />
-                  Log In
-                </Link>
-                {/* Developer's own temporary testing fallback — see AuthContext.tsx */}
-                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                  <DialogTrigger asChild>
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
-                    >
-                      <LogIn className="h-4 w-4" />
-                      Admin Login
-                    </button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-sm bg-card">
-                    <DialogHeader>
-                      <DialogTitle className="font-serif text-2xl font-normal">Admin Login</DialogTitle>
-                      <DialogDescription className="text-muted-foreground text-sm">
-                        Enter the admin password to manage classrooms.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleLogin} className="space-y-5 pt-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="password" className="text-xs tracking-widest uppercase text-muted-foreground">
-                          Password
-                        </Label>
-                        <Input
-                          id="password"
-                          type="password"
-                          placeholder="••••••••"
-                          value={password}
-                          onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
-                          className="bg-background border-border"
-                        />
-                        {loginError && <p className="text-xs text-destructive">{loginError}</p>}
-                      </div>
-                      <button
-                        type="submit"
-                        className="w-full bg-foreground text-background text-sm tracking-widest uppercase py-3 rounded-full hover:bg-foreground/90 transition-colors"
-                      >
-                        Enter
-                      </button>
-                    </form>
-                  </DialogContent>
-                </Dialog>
-              </>
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
+              >
+                <LogIn className="h-4 w-4" />
+                Log In
+              </Link>
             )}
           </div>
         </div>

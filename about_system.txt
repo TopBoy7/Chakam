@@ -596,20 +596,18 @@ API CLIENT (src/lib/api.ts)
     typed TypeScript interfaces that the frontend works with.
 
 AUTH CONTEXT (src/contexts/AuthContext.tsx)
-  Real server-side authentication as of the auth work (Phases 1-3 of
-  auth_design.txt — see AUTH_CHANGES.md for the full change log). A student
-  or staff member logs in with their UNILAG email and a one-time code sent by
-  mail (POST /auth/request-code, POST /auth/verify-code); the backend issues
-  a JWT, stored in localStorage and sent as an Authorization: Bearer header on
+  Real server-side authentication (all four phases of auth_design.txt — see
+  AUTH_CHANGES.md for the full change log). A student or staff member logs in
+  with their UNILAG email and a one-time code sent by mail
+  (POST /auth/request-code, POST /auth/verify-code); the backend issues a
+  JWT, stored in localStorage and sent as an Authorization: Bearer header on
   every request. AuthContext exposes { token, user, loading, isAdmin,
   loginWithToken, logout, refreshUser }. The user object is never trusted from
   a cache — it is re-fetched from GET /auth/me on every mount.
 
-  The legacy VITE_ADMIN_PASSWORD path (client-side password comparison,
-  no token) still exists in parallel — a login() function kept for backward
-  compatibility, feeding into the same isAdmin flag
-  (isAdmin = legacyPasswordLogin || user?.role === "admin"). It has not been
-  removed yet; that is Phase 4 of the auth work.
+  The legacy VITE_ADMIN_PASSWORD path has been fully removed — admin access
+  is now only ever granted through the same email/code login as every other
+  role, via ADMIN_EMAILS. isAdmin is simply user?.role === "admin".
 
   Role is never trusted from the JWT claim on the backend — auth.py's
   get_current_user dependency re-reads the role from MongoDB on every
@@ -672,8 +670,6 @@ ROUTING (src/App.tsx)
 ENVIRONMENT VARIABLES (frontend/.env)
   VITE_API_BASE_URL     Backend HTTP base URL
   VITE_WS_URL           Backend WebSocket base URL
-  VITE_ADMIN_PASSWORD   Legacy admin login password — still active, removed
-                        in Phase 4 of the auth work
 
 
 ================================================================================

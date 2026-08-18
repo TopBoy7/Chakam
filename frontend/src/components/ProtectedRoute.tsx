@@ -8,20 +8,13 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) => {
-  const { user, loading, isAdmin } = useAuth();
+  const { user, loading } = useAuth();
   const location = useLocation();
 
   // Wait for the /auth/me rehydration to resolve before deciding — otherwise
   // a logged-in user briefly flashes a redirect while the token is verified.
   if (loading) {
     return null;
-  }
-
-  // Legacy password login — developer's own temporary testing fallback
-  // until the mailer is confirmed working (see AuthContext.tsx). Remove
-  // this block together with that one.
-  if (isAdmin && allowedRoles.includes("admin")) {
-    return <>{children}</>;
   }
 
   if (!user) {

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -6,6 +6,17 @@ from bson import ObjectId
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ensure_aware(v: Optional[datetime]) -> Optional[datetime]:
+    """MongoDB drivers return naive datetimes by default even for values that
+    were written as UTC-aware (BSON stores no timezone, and this client
+    doesn't set tz_aware=True) — coerce back to aware here so nothing
+    downstream ever compares a naive value read from the database against an
+    aware one computed fresh (e.g. auth.utcnow()), which raises a TypeError."""
+    if v is not None and v.tzinfo is None:
+        return v.replace(tzinfo=timezone.utc)
+    return v
 
 
 class Classroom(BaseModel):
@@ -137,6 +148,11 @@ class User(BaseModel):
             values["_id"] = str(values["_id"])
         return values
 
+    @field_validator("emailVerifiedAt", "createdAt", "lastLoginAt", "roleAssignedAt")
+    @classmethod
+    def _tz_aware(cls, v):
+        return _ensure_aware(v)
+
     model_config = {"populate_by_name": True}
 
 
@@ -155,6 +171,11 @@ class LoginCode(BaseModel):
         if "_id" in values and isinstance(values["_id"], ObjectId):
             values["_id"] = str(values["_id"])
         return values
+
+    @field_validator("expiresAt", "consumedAt", "createdAt")
+    @classmethod
+    def _tz_aware(cls, v):
+        return _ensure_aware(v)
 
     model_config = {"populate_by_name": True}
 
