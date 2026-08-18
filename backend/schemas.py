@@ -76,7 +76,7 @@ class CreateLecturerRequest(BaseModel):
             "example": {
                 "staffId": "STAFF-001",
                 "fullName": "Dr. Amaka Obi",
-                "email": "a.obi@university.edu.ng",
+                "email": "a.obi@unilag.edu.ng",
             }
         }
     }
@@ -151,6 +151,54 @@ class ManualAttendanceRequest(BaseModel):
 
 class DeleteBiometricsRequest(BaseModel):
     matricNumber: str
+
+
+# -------------------------------------------------------
+# AUTHENTICATION
+# -------------------------------------------------------
+class RequestCodeRequest(BaseModel):
+    email: str
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"email": "190403014@live.unilag.edu.ng"}
+        }
+    }
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"email": "190403014@live.unilag.edu.ng", "code": "123456"}
+        }
+    }
+
+
+class UpdateMeRequest(BaseModel):
+    fullName: str
+
+
+class AssignRoleRequest(BaseModel):
+    role: str
+    staffId: Optional[str] = None
+    fullName: Optional[str] = None
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {"role": "lecturer", "staffId": "STAFF-001", "fullName": "Dr. Amaka Obi"}
+        }
+    }
+
+
+class SetStatusRequest(BaseModel):
+    status: str
+
+    model_config = {
+        "json_schema_extra": {"example": {"status": "suspended"}}
+    }
 
 
 # -------------------------------------------------------

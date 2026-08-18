@@ -1,13 +1,38 @@
 import type { Course, RegisteredStudent, Session, AttendanceRecord, StudentAttendanceSummary, StudentRecord, Enrollment } from '@/types/attendance';
 import type { Lecturer } from '@/types/lecturer';
+import type { User } from '@/types/auth';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 const WS_BASE  = import.meta.env.VITE_WS_URL       || 'ws://localhost:8000';
 
+// ── auth token ───────────────────────────────────────────────────────────────
+
+const TOKEN_STORAGE_KEY = 'chakam_token';
+
+function getToken(): string | null {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+// Every request goes through here so an Authorization header is attached
+// whenever a token exists, without touching each of the call sites below.
+function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  if (!token) return fetch(url, init);
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  return fetch(url, { ...init, headers });
+}
 
 async function throwOnError(res: Response): Promise<Response> {
   if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
     let detail = `HTTP ${res.status}`;
     try {
       const raw = (await res.json())?.detail;
@@ -23,6 +48,20 @@ async function throwOnError(res: Response): Promise<Response> {
     throw new Error(detail);
   }
   return res;
+}
+
+function transformUser(raw: Record<string, unknown>): User {
+  return {
+    email: raw.email as string,
+    role: raw.role as User['role'],
+    status: raw.status as User['status'],
+    matricNumber: (raw.matricNumber as string) ?? null,
+    staffId: (raw.staffId as string) ?? null,
+    fullName: (raw.fullName as string) || '',
+    emailVerifiedAt: raw.emailVerifiedAt as string,
+    createdAt: raw.createdAt as string,
+    lastLoginAt: (raw.lastLoginAt as string) ?? null,
+  };
 }
 
 function transformCourse(raw: Record<string, unknown>, studentCount = 0): Course {
@@ -104,15 +143,15 @@ export const api = {
   // ===========================================================================
   classrooms: {
     list: async () => {
-      const res = await throwOnError(await fetch(`${API_BASE}/classrooms`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/classrooms`));
       return (await res.json()).data.classrooms;
     },
     get: async (classId: string) => {
-      const res = await throwOnError(await fetch(`${API_BASE}/classrooms/${classId}`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/classrooms/${classId}`));
       return (await res.json()).data.classroom;
     },
     create: async (payload: { classId: string; className: string; capacity: number; deviceId: string }) => {
-      const res = await throwOnError(await fetch(`${API_BASE}/classrooms`, {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/classrooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -123,7 +162,7 @@ export const api = {
       classId?: string; className?: string; capacity?: number;
       deviceId?: string; latestImage?: string; occupancy?: number;
     }) => {
-      const res = await throwOnError(await fetch(`${API_BASE}/classrooms/${classId}`, {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/classrooms/${classId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -131,7 +170,7 @@ export const api = {
       return (await res.json()).data.classroom;
     },
     delete: async (classId: string) => {
-      await throwOnError(await fetch(`${API_BASE}/classrooms/${classId}`, { method: 'DELETE' }));
+      await throwOnError(await apiFetch(`${API_BASE}/classrooms/${classId}`, { method: 'DELETE' }));
       return true;
     },
   },
@@ -141,16 +180,16 @@ export const api = {
   // ===========================================================================
   lecturers: {
     list: async (): Promise<Lecturer[]> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/lecturers`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/lecturers`));
       const raw: Array<Record<string, unknown>> = (await res.json()).data.lecturers ?? [];
       return raw.map(transformLecturer);
     },
     get: async (staffId: string): Promise<Lecturer> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`));
       return transformLecturer((await res.json()).data.lecturer);
     },
     create: async (payload: { staffId: string; fullName: string; email: string }): Promise<string> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/lecturers`, {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/lecturers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -158,7 +197,7 @@ export const api = {
       return (await res.json()).data.id as string;
     },
     delete: async (staffId: string): Promise<void> => {
-      await throwOnError(await fetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`, { method: 'DELETE' }));
+      await throwOnError(await apiFetch(`${API_BASE}/lecturers/${encodeURIComponent(staffId)}`, { method: 'DELETE' }));
     },
   },
 
@@ -167,26 +206,26 @@ export const api = {
   // ===========================================================================
   students: {
     list: async (): Promise<StudentRecord[]> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/students`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/students`));
       const raw: Array<Record<string, unknown>> = (await res.json()).data.students ?? [];
       return raw.map(transformStudentRecord);
     },
     get: async (matricNumber: string): Promise<StudentRecord> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}`));
       return transformStudentRecord((await res.json()).data.student);
     },
     deleteEmbeddings: async (matricNumber: string): Promise<void> => {
-      await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/embeddings`, {
+      await throwOnError(await apiFetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/embeddings`, {
         method: 'DELETE',
       }));
     },
     getEnrollments: async (matricNumber: string): Promise<Enrollment[]> => {
-      const res = await throwOnError(await fetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/enrollments`));
+      const res = await throwOnError(await apiFetch(`${API_BASE}/students/${encodeURIComponent(matricNumber)}/enrollments`));
       const raw: Array<Record<string, unknown>> = (await res.json()).data.enrollments ?? [];
       return raw.map(transformEnrollment);
     },
     register: async (formData: FormData): Promise<void> => {
-      await throwOnError(await fetch(`${API_BASE}/students/register`, {
+      await throwOnError(await apiFetch(`${API_BASE}/students/register`, {
         method: 'POST',
         body: formData,
       }));
@@ -202,13 +241,13 @@ export const api = {
     courses: {
 
       list: async (): Promise<Course[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/courses`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses`));
         const rawCourses: Record<string, unknown>[] = (await res.json()).data.courses;
 
         const counts = await Promise.all(
           rawCourses.map(async (c) => {
             try {
-              const r = await fetch(`${API_BASE}/courses/${c.courseCode}/enrollments`);
+              const r = await apiFetch(`${API_BASE}/courses/${c.courseCode}/enrollments`);
               if (!r.ok) return 0;
               const d = await r.json();
               return (d.data?.enrollments as unknown[] ?? []).length;
@@ -222,12 +261,12 @@ export const api = {
       },
 
       get: async (courseCode: string): Promise<Course> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}`));
         const raw = (await res.json()).data.course as Record<string, unknown>;
 
         let studentCount = 0;
         try {
-          const r = await fetch(`${API_BASE}/courses/${courseCode}/enrollments`);
+          const r = await apiFetch(`${API_BASE}/courses/${courseCode}/enrollments`);
           if (r.ok) {
             const d = await r.json();
             studentCount = (d.data?.enrollments as unknown[] ?? []).length;
@@ -238,18 +277,18 @@ export const api = {
       },
 
       create: async (payload: { courseCode: string; courseName: string }): Promise<Course> => {
-        await throwOnError(await fetch(`${API_BASE}/courses`, {
+        await throwOnError(await apiFetch(`${API_BASE}/courses`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }));
-        const res = await throwOnError(await fetch(`${API_BASE}/courses/${payload.courseCode}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses/${payload.courseCode}`));
         const raw = (await res.json()).data.course as Record<string, unknown>;
         return transformCourse(raw, 0);
       },
 
       update: async (courseCode: string, payload: { courseName?: string; lecturerId?: string }): Promise<Course> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}`, {
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -259,7 +298,7 @@ export const api = {
       },
 
       delete: async (courseCode: string): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}`, { method: 'DELETE' }));
+        await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}`, { method: 'DELETE' }));
       },
     },
 
@@ -267,13 +306,13 @@ export const api = {
     enrollments: {
 
       list: async (courseCode: string): Promise<Enrollment[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/enrollments`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/enrollments`));
         const raw: Array<Record<string, unknown>> = (await res.json()).data.enrollments ?? [];
         return raw.map(transformEnrollment);
       },
 
       enroll: async (courseCode: string, matricNumber: string): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/enrollments`, {
+        await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/enrollments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ matricNumber }),
@@ -281,7 +320,7 @@ export const api = {
       },
 
       unenroll: async (courseCode: string, matricNumber: string): Promise<void> => {
-        await throwOnError(await fetch(
+        await throwOnError(await apiFetch(
           `${API_BASE}/courses/${courseCode}/enrollments/${encodeURIComponent(matricNumber)}`,
           { method: 'DELETE' }
         ));
@@ -292,7 +331,7 @@ export const api = {
     students: {
 
       list: async (courseCode: string): Promise<RegisteredStudent[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/students`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/students`));
         const raw: Array<Record<string, unknown>> = (await res.json()).data.students ?? [];
         return raw.map((s) => ({
           id: s.matricNumber as string,
@@ -304,14 +343,14 @@ export const api = {
       },
 
       register: async (courseCode: string, formData: FormData): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/register`, {
+        await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/register`, {
           method: 'POST',
           body: formData,
         }));
       },
 
       deleteBiometrics: async (courseCode: string, matricNumber: string): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/courses/${courseCode}/students/biometrics`, {
+        await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/students/biometrics`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ matricNumber: matricNumber.trim().toUpperCase() }),
@@ -323,7 +362,7 @@ export const api = {
     sessions: {
 
       list: async (courseCode: string): Promise<Session[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions?courseCode=${encodeURIComponent(courseCode)}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions?courseCode=${encodeURIComponent(courseCode)}`));
         const raw: Array<Record<string, unknown>> = (await res.json()).data.sessions ?? [];
         return raw.map(transformSession);
       },
@@ -331,40 +370,40 @@ export const api = {
       listByClass: async (classId: string, status?: string): Promise<Session[]> => {
         const params = new URLSearchParams({ classId });
         if (status) params.set('status', status);
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions?${params}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions?${params}`));
         const raw: Array<Record<string, unknown>> = (await res.json()).data.sessions ?? [];
         return raw.map(transformSession);
       },
 
       get: async (sessionId: string): Promise<Session> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions/${sessionId}`));
         return transformSession((await res.json()).data.session);
       },
 
       start: async (courseCode: string, classId: string): Promise<Session> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions`, {
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ courseCode, classId }),
         }));
         const { sessionId } = (await res.json()).data as { sessionId: string };
-        const full = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}`));
+        const full = await throwOnError(await apiFetch(`${API_BASE}/sessions/${sessionId}`));
         return transformSession((await full.json()).data.session);
       },
 
       end: async (sessionId: string): Promise<void> => {
-        await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}/end`, { method: 'POST' }));
+        await throwOnError(await apiFetch(`${API_BASE}/sessions/${sessionId}/end`, { method: 'POST' }));
       },
 
       getAttendance: async (sessionId: string): Promise<AttendanceRecord[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}/attendance`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions/${sessionId}/attendance`));
         const data = (await res.json()).data;
         const attendees: Array<Record<string, unknown>> = data?.attendees ?? [];
         return transformAttendees(attendees, sessionId);
       },
 
       updateAttendance: async (sessionId: string, matricNumber: string, status: 'present' | 'absent'): Promise<void> => {
-        await throwOnError(await fetch(
+        await throwOnError(await apiFetch(
           `${API_BASE}/sessions/${sessionId}/attendance/${encodeURIComponent(matricNumber)}`,
           {
             method: 'PUT',
@@ -375,7 +414,7 @@ export const api = {
       },
 
       capture: async (sessionId: string): Promise<AttendanceRecord[]> => {
-        const res = await throwOnError(await fetch(`${API_BASE}/sessions/${sessionId}/capture`, { method: 'POST' }));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/sessions/${sessionId}/capture`, { method: 'POST' }));
         const records: AttendanceRecord[] = (await res.json()).data.records ?? [];
         return records;
       },
@@ -385,11 +424,80 @@ export const api = {
     portal: {
       lookup: async (matricNumber: string): Promise<StudentAttendanceSummary[]> => {
         const encoded = encodeURIComponent(matricNumber.trim().toUpperCase());
-        const res = await throwOnError(await fetch(`${API_BASE}/students/lookup/${encoded}`));
+        const res = await throwOnError(await apiFetch(`${API_BASE}/students/lookup/${encoded}`));
         return (await res.json()).data.results;
       },
     },
   },
+
+  // ===========================================================================
+  // AUTHENTICATION
+  // ===========================================================================
+  auth: {
+    requestCode: async (email: string): Promise<void> => {
+      await throwOnError(await apiFetch(`${API_BASE}/auth/request-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      }));
+    },
+
+    verifyCode: async (email: string, code: string): Promise<{ token: string; user: User }> => {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/auth/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      }));
+      const data = (await res.json()).data as { token: string; user: Record<string, unknown> };
+      return { token: data.token, user: transformUser(data.user) };
+    },
+
+    getMe: async (): Promise<User> => {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/auth/me`));
+      return transformUser((await res.json()).data.user);
+    },
+
+    updateMe: async (fullName: string): Promise<User> => {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/auth/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName }),
+      }));
+      return transformUser((await res.json()).data.user);
+    },
+
+    logout: async (): Promise<void> => {
+      await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    },
+
+    listUsers: async (role?: string): Promise<User[]> => {
+      const params = role ? `?role=${encodeURIComponent(role)}` : '';
+      const res = await throwOnError(await apiFetch(`${API_BASE}/admin/users${params}`));
+      const raw: Array<Record<string, unknown>> = (await res.json()).data.users ?? [];
+      return raw.map(transformUser);
+    },
+
+    assignRole: async (
+      email: string,
+      payload: { role: string; staffId?: string; fullName?: string }
+    ): Promise<User> => {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(email)}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }));
+      return transformUser((await res.json()).data.user);
+    },
+
+    setUserStatus: async (email: string, status: 'active' | 'suspended'): Promise<User> => {
+      const res = await throwOnError(await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(email)}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      }));
+      return transformUser((await res.json()).data.user);
+    },
+  },
 };
 
-export { WS_BASE };
+export { WS_BASE, TOKEN_STORAGE_KEY };

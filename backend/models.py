@@ -1,7 +1,11 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class Classroom(BaseModel):
@@ -110,6 +114,49 @@ class AttendanceEntry(BaseModel):
     markedAt: datetime = Field(default_factory=datetime.now)
     method: str = "auto"      # "auto" | "manual"
     manuallyOverridden: bool = False
+
+
+class User(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
+    email: str
+    role: str = "pending"          # "student" | "lecturer" | "admin" | "pending"
+    status: str = "active"         # "active" | "suspended"
+    matricNumber: Optional[str] = None   # students only, derived from email local part
+    staffId: Optional[str] = None        # lecturers only, links to lecturers collection
+    fullName: str = ""
+    emailVerifiedAt: datetime = Field(default_factory=_utcnow)
+    createdAt: datetime = Field(default_factory=_utcnow)
+    lastLoginAt: Optional[datetime] = None
+    roleAssignedBy: Optional[str] = None
+    roleAssignedAt: Optional[datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_objectid_to_str(cls, values):
+        if "_id" in values and isinstance(values["_id"], ObjectId):
+            values["_id"] = str(values["_id"])
+        return values
+
+    model_config = {"populate_by_name": True}
+
+
+class LoginCode(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
+    email: str
+    codeHash: str
+    expiresAt: datetime
+    attempts: int = 0
+    consumedAt: Optional[datetime] = None
+    createdAt: datetime = Field(default_factory=_utcnow)
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_objectid_to_str(cls, values):
+        if "_id" in values and isinstance(values["_id"], ObjectId):
+            values["_id"] = str(values["_id"])
+        return values
+
+    model_config = {"populate_by_name": True}
 
 
 class Session(BaseModel):

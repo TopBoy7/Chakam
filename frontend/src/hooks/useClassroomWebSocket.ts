@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { TOKEN_STORAGE_KEY } from "@/lib/api";
 
 /*
  Robust reconnecting websocket hook with logging and periodic ping.
@@ -35,11 +36,14 @@ export const useClassroomWebSocket = (onMessage: WSMessageHandler) => {
       ws.onopen = () => {
         console.info("[WS] open");
         backoff = 1000;
-        // send an initial hello so backend receive_text() logs it
+        // The token must be the very first message — the server closes any
+        // connection that hasn't authenticated within 5 seconds. Re-sent on
+        // every reconnect since onopen fires again each time.
         try {
-          ws.send(JSON.stringify({ type: "hello", ts: Date.now() }));
+          const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+          ws.send(JSON.stringify({ token }));
         } catch (e) {
-          console.warn("[WS] send hello failed", e);
+          console.warn("[WS] send auth failed", e);
         }
         // ping every 25s
         if (pingIntervalRef.current) window.clearInterval(pingIntervalRef.current);

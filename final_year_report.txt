@@ -1,0 +1,1102 @@
+================================================================================
+
+        CHAKAM: A SMART CLASSROOM OCCUPANCY DETECTION AND AUTOMATED
+               ATTENDANCE MANAGEMENT SYSTEM
+
+        Final Year Project Report
+        Department of Computer Science
+        2025/2026 Academic Session
+
+================================================================================
+
+
+================================================================================
+ABSTRACT
+================================================================================
+
+This report presents the design, architecture, and implementation of Chakam,
+a smart classroom management system that integrates real-time occupancy
+detection with biometric face recognition to automate student attendance
+tracking. The system addresses the limitations of traditional manual attendance
+methods by leveraging computer vision — specifically the YOLOv8 object detection
+model and the dlib-based face recognition pipeline — to provide continuous,
+unobtrusive, and accurate attendance marking during academic sessions.
+
+The backend is built on FastAPI, an asynchronous Python web framework, and
+communicates with a MongoDB Atlas database. The frontend is developed using
+React 18 and TypeScript, receiving live updates through a persistent WebSocket
+connection. The system also incorporates full compliance with the Nigeria Data
+Protection Act (NDPA) 2023, implementing the right to erasure, the right of
+access, and strict data minimisation principles — storing only mathematical
+face embeddings rather than photographs.
+
+Results demonstrate that the system can identify enrolled students from live
+camera frames, update attendance records in real time, and provide lecturers
+with an accurate session log without requiring any manual intervention during
+the class.
+
+
+================================================================================
+CHAPTER ONE: INTRODUCTION
+================================================================================
+
+1.1 Background to the Study
+----------------------------
+The conventional approach to recording student attendance in Nigerian higher
+education institutions involves lecturers or class representatives manually
+calling names, circulating paper sheets, or using basic digital spreadsheets.
+These methods are time-consuming, prone to proxy attendance (where one student
+signs in on behalf of another), and produce records that are difficult to
+aggregate, analyse, or audit at scale. As class sizes grow and the administrative
+burden on academic staff increases, there is a compelling need for an automated,
+reliable, and legally compliant alternative.
+
+Concurrent to attendance challenges, physical space management in educational
+institutions suffers from poor visibility. Administrators have no real-time
+means of knowing how many students occupy a given room at any moment, making
+it difficult to optimise room allocation, enforce fire safety capacity limits,
+or respond to emergencies.
+
+Advances in computer vision, deep learning, and edge computing have made it
+feasible to address both problems simultaneously using a single camera device
+per classroom. Object detection models such as YOLO (You Only Look Once) can
+count people in a frame with high accuracy and low latency. Face recognition
+libraries built on top of deep residual networks can identify specific
+individuals from a database of known faces with sufficient accuracy for
+controlled environments such as classrooms.
+
+Chakam was designed to unify both capabilities — occupancy monitoring and
+biometric attendance — in a single, privacy-aware, institutionally deployable
+platform.
+
+
+1.2 Statement of the Problem
+------------------------------
+The following specific problems motivated this project:
+
+  i.   Manual attendance recording is susceptible to proxy fraud, transcription
+       errors, and deliberate manipulation by students.
+
+  ii.  Attendance data collected on paper must be manually transferred to
+       digital records, creating duplication of effort and introducing further
+       error.
+
+  iii. There is no mechanism in most institutions for students to independently
+       verify their attendance records in real time, leading to disputes at the
+       end of the semester.
+
+  iv.  Classroom space utilisation data is unavailable, preventing informed
+       timetabling and room allocation decisions.
+
+  v.   Existing biometric attendance solutions, particularly fingerprint-based
+       systems, require physical contact, are slow for large classes, and are
+       not compliant with current data protection principles around data
+       minimisation.
+
+
+1.3 Aim and Objectives
+------------------------
+The aim of this project is to design and implement a smart classroom system
+that automates both occupancy monitoring and student attendance tracking using
+computer vision, with full compliance with the Nigeria Data Protection Act 2023.
+
+The specific objectives are:
+
+  i.   To develop a backend API capable of receiving images from classroom
+       devices and performing real-time person detection using the YOLOv8 model.
+
+  ii.  To implement a face recognition pipeline that identifies enrolled students
+       from live frames and marks their attendance automatically.
+
+  iii. To build a student self-registration portal through which students can
+       upload their face photographs and give explicit biometric consent prior
+       to being enrolled in the system.
+
+  iv.  To provide lecturers with a real-time dashboard that reflects live
+       attendance and allows manual correction where necessary.
+
+  v.   To implement consent management features as required by NDPA 2023,
+       including the right to erasure of biometric data and the right of access
+       to all stored personal data.
+
+  vi.  To expose a public student-facing portal where any student can look up
+       their own attendance record without requiring an account or login.
+
+
+1.4 Scope of the Study
+------------------------
+This project covers the server-side API, the web-based frontend interface, and
+the integration between occupancy detection and attendance tracking. The design
+of the physical camera device and its firmware is outside the scope of this
+report, though the API endpoints it communicates with are fully specified and
+implemented. The system is designed and tested for the local network and cloud
+deployment environments and does not include a native mobile application.
+
+
+1.5 Significance of the Study
+-------------------------------
+This system demonstrates that biometric attendance marking can be implemented
+in a privacy-first manner — without retaining photographs — while remaining
+accurate and operationally practical. It provides a reference architecture for
+institutions seeking to automate attendance in compliance with the NDPA. The
+dual-purpose nature of the image endpoint (occupancy and attendance from the
+same frame) also offers an efficient model for deploying computer vision in
+resource-constrained institutional settings.
+
+
+================================================================================
+CHAPTER TWO: LITERATURE REVIEW
+================================================================================
+
+2.1 Attendance Management Systems
+-----------------------------------
+Traditional attendance management has been widely studied. Baig et al. (2019)
+reviewed manual, RFID, and fingerprint-based systems, concluding that manual
+systems remain predominant in developing countries despite their well-documented
+weaknesses, primarily due to cost and infrastructure constraints. Fingerprint
+systems, while effective for small groups, suffer from latency issues in large
+lecture settings where hundreds of students must interact with a single reader.
+
+Camera-based attendance systems have attracted increasing research interest.
+Guo et al. (2020) demonstrated a multi-face recognition system capable of
+identifying students from a single wide-angle classroom photograph. However,
+their system required high image resolution and a controlled lighting setup.
+The approach adopted in this project uses dlib's pre-trained ResNet face
+encoder, which is more robust to lighting variation and does not require
+purpose-built hardware beyond a standard USB or IP camera.
+
+
+2.2 Object Detection with YOLO
+--------------------------------
+The YOLO (You Only Look Once) architecture, first introduced by Redmon et al.
+(2016), unified object detection into a single neural network pass, enabling
+real-time inference. Subsequent versions have progressively improved accuracy
+and efficiency. YOLOv8, released by Ultralytics in 2023, introduced a new
+anchor-free detection head and improved backbone architecture. The nano variant
+(yolov8n.pt) used in this project is optimised for inference speed at the cost
+of some accuracy, making it suitable for embedded or server-side deployment
+where low latency is required.
+
+In the context of occupancy detection, Shen et al. (2021) demonstrated that
+YOLO-based person counting achieves competitive accuracy compared to purpose-
+built crowd counting models while offering broader deployment flexibility. This
+informed the decision to use YOLOv8 as the occupancy detection backbone rather
+than a dedicated regression-based density estimation model.
+
+
+2.3 Face Recognition
+---------------------
+The face recognition library used in this project wraps dlib's face recognition
+model, based on the work of King (2015) and a ResNet architecture trained on
+a large face dataset. The model produces a 128-dimensional face embedding
+vector for any given face image. Recognition is performed by computing the
+Euclidean distance between the embedding of an unknown face and the embeddings
+of known individuals. A threshold of 0.6 is typically recommended by the
+library authors; this project uses 0.55 for a more conservative match rate
+suitable for a high-stakes academic context.
+
+Compared to approaches based on Principal Component Analysis (PCA/Eigenfaces)
+or Local Binary Pattern Histograms (LBPH), deep embedding-based methods offer
+substantially better robustness to illumination changes, pose variation, and
+aging — all of which are practically relevant in a university classroom setting.
+
+
+2.4 Data Protection in Biometric Systems
+------------------------------------------
+The ethical and legal dimensions of biometric data collection in educational
+settings have received increasing attention. The Nigeria Data Protection Act
+2023 establishes a legal framework that imposes explicit requirements on the
+collection, storage, and erasure of personal data, including biometric
+information. Section 24 mandates data minimisation — collecting only what is
+strictly necessary for the stated purpose. Section 36 establishes the right to
+erasure, compelling data controllers to permanently delete personal data on
+request.
+
+Chakam implements both requirements architecturally: photographs are discarded
+immediately after embedding extraction (data minimisation), and a dedicated
+endpoint permanently clears all stored embeddings while preserving non-biometric
+records (right to erasure).
+
+
+================================================================================
+CHAPTER THREE: SYSTEM DESIGN AND ARCHITECTURE
+================================================================================
+
+3.1 System Overview
+---------------------
+Chakam consists of four principal components that interact across two network
+layers:
+
+  1. Physical camera devices deployed in classrooms, which capture images and
+     POST them to the backend at configurable intervals.
+
+  2. A FastAPI backend server that processes images, manages the database, and
+     serves the REST API consumed by both devices and the frontend.
+
+  3. A MongoDB Atlas cloud database that persists all application data across
+     six collections.
+
+  4. A React/TypeScript frontend that provides the administrative and student-
+     facing interfaces and receives real-time updates via WebSocket.
+
+Figure 3.1 illustrates the high-level architecture:
+
+  [Camera Device] ──POST image──► [FastAPI Backend]
+                                        │
+                       ┌────────────────┤
+                       ▼                ▼
+                   [MongoDB]      [Cloudinary]
+                       │
+                       ├──WebSocket broadcast──► [Admin Dashboard]
+                       └──REST API──────────────► [Frontend Pages]
+
+
+3.2 Backend Architecture
+--------------------------
+The backend is implemented in Python 3.11 using FastAPI, an ASGI-compliant
+web framework built on Starlette and Pydantic. FastAPI was selected for its
+native support for async/await, automatic OpenAPI documentation generation,
+and tight integration with Pydantic for request and response validation.
+
+All I/O-bound operations — database reads and writes, cloud storage uploads,
+and WebSocket broadcasts — are implemented as async coroutines using Python's
+asyncio event loop. CPU-bound operations — specifically YOLO inference and
+face encoding — are offloaded to a thread pool executor via
+asyncio.get_running_loop().run_in_executor() to avoid blocking the event loop
+during computationally intensive tasks.
+
+The server is served by Uvicorn, a high-performance ASGI server, and is
+configured to run on port 8000. Cross-Origin Resource Sharing (CORS) is
+enabled for all origins to facilitate development and institutional deployment
+across different domains.
+
+A global exception handler is registered on the FastAPI application to ensure
+that all unhandled exceptions return a JSON response with the appropriate CORS
+headers. Without this, unhandled 500 errors propagate past the CORS middleware
+before headers can be injected, causing the browser to display an opaque
+network error rather than the actual failure message.
+
+
+3.3 Database Design
+--------------------
+MongoDB Atlas is used as the database engine. MongoDB was selected over a
+relational database for its document-oriented model, which naturally represents
+the nested structure of session and attendance data — a Session document
+contains an embedded array of AttendanceEntry subdocuments, eliminating the
+need for a JOIN between sessions and attendance tables.
+
+The database is named smartclassDB and contains six collections:
+
+  classrooms   — One document per physical classroom, updated in real time
+                 by the YOLO occupancy pipeline.
+
+  lecturers    — One document per registered lecturer.
+
+  courses      — One document per academic course, including the UUID
+                 registration token used for student self-registration.
+
+  students     — One document per student, containing all face embedding
+                 vectors (up to five per student) and full NDPA consent
+                 metadata.
+
+  enrollments  — Junction collection linking a student (by matricNumber) to
+                 a course (by courseCode). One document per student-course pair.
+
+  sessions     — One document per class session, with an embedded array of
+                 AttendanceEntry subdocuments that grows as students are
+                 identified by the face recognition pipeline.
+
+All database operations are implemented as async functions in database.py using
+Motor, the async MongoDB driver for Python. Queries are designed to be
+idempotent where possible — particularly the attendance marking function, which
+checks for existing records before inserting to prevent duplicates.
+
+
+3.4 Frontend Architecture
+---------------------------
+The frontend is a single-page application (SPA) built with React 18, TypeScript,
+and Vite. The UI component library is ShadCN UI, which provides pre-built,
+accessible components based on Radix UI primitives and styled with Tailwind CSS.
+
+All HTTP communication is centralised in a single api object defined in
+src/lib/api.ts. No component issues fetch calls directly. This architectural
+decision ensures that the base URL, error parsing, and data transformation are
+maintained in a single location, reducing duplication and simplifying future
+changes to the API contract.
+
+Data transformation functions (transformCourse, transformSession,
+transformLecturer, etc.) normalise raw MongoDB document structures into typed
+TypeScript interfaces before they reach component state, ensuring that
+components always work with consistently shaped data regardless of backend
+changes.
+
+Authentication is implemented as a client-side check using localStorage. The
+admin password is stored in the VITE_ADMIN_PASSWORD environment variable and
+baked into the frontend bundle at build time. This approach is suitable for
+a trusted internal network environment but would need to be replaced with
+server-side JWT or OAuth for a publicly accessible production system.
+
+Real-time updates are managed by a custom React hook
+(useClassroomWebSocket.ts) that maintains a persistent WebSocket connection
+to the backend. The hook implements exponential backoff reconnection — starting
+at one second and doubling up to a maximum of thirty seconds — and sends a
+keep-alive ping every twenty-five seconds to prevent idle timeout disconnects
+from intermediary proxies.
+
+
+3.5 Environment Configuration
+-------------------------------
+The backend reads its configuration from a .env file validated by env.py at
+startup. If any required variable is absent, the server exits immediately with
+an error message rather than running in an undefined state. Required variables
+are:
+
+  DATABASE_URL          — MongoDB Atlas connection string (TLS-enabled)
+  CLOUDINARY_API_KEY    — Cloudinary API credentials for image storage
+  CLOUDINARY_API_SECRET
+  CLOUDINARY_CLOUD_NAME
+
+The frontend reads its configuration from a separate .env file. Variables are
+prefixed with VITE_ and are inlined into the JavaScript bundle at build time:
+
+  VITE_API_BASE_URL   — Backend HTTP base URL
+  VITE_WS_URL         — Backend WebSocket base URL
+  VITE_ADMIN_PASSWORD — Admin login password
+
+
+================================================================================
+CHAPTER FOUR: THE OCCUPANCY DETECTION SYSTEM
+================================================================================
+
+4.1 Overview
+-------------
+The occupancy detection module uses the YOLOv8 nano object detection model to
+count the number of people present in a classroom from a single camera frame.
+The result is stored in the classroom's database document and broadcast in
+real time to all connected frontend clients. This provides administrators and
+lecturers with continuous awareness of classroom headcount without any manual
+counting or reporting.
+
+
+4.2 Image Ingestion
+--------------------
+Camera devices are registered in the system with a unique deviceId. When a
+device sends an image to the backend, it does so via a multipart HTTP POST
+request to the endpoint:
+
+  POST /classrooms/{classId}/image
+
+The request must include the device's deviceId as a form field. The backend
+validates this against the deviceId stored for the classroom, ensuring that
+only the authorised camera for a given room can submit images. A mismatch
+results in a 403 Forbidden response.
+
+The image is received as an UploadFile object and its raw bytes are read into
+memory. OpenCV's imdecode function decodes the bytes into a numpy array
+(height × width × 3, BGR colour order). If decoding fails — indicating a
+corrupt or unsupported file — the server returns a 400 Bad Request.
+
+
+4.3 Model Inference
+--------------------
+The YOLOv8 nano model (yolov8n.pt) is loaded lazily: on the first image
+request after server startup, the model is loaded and stored in
+app.state.yolo_model. Subsequent requests reuse the cached model, avoiding
+the multi-second load cost on every inference.
+
+Model loading and inference are both executed in a thread pool executor to
+prevent blocking the async event loop during CPU-intensive computation. The
+inference call is:
+
+  model.predict(img, imgsz=1920, conf=0.25, iou=0.45, augment=True)
+
+Each parameter was selected with deliberate intent:
+
+  imgsz=1920  — Processes the input at up to 1920 pixels on the longer edge.
+                 A higher resolution allows the model to detect smaller or
+                 more distant people who might be missed at 640px (the default).
+
+  conf=0.25   — Only bounding boxes with a confidence score of at least 25%
+                 are considered. This is lower than the default of 0.5,
+                 accepting more detections at the risk of some false positives.
+                 In a classroom, false positives (detecting a person where
+                 there is none) are less harmful than false negatives (missing
+                 a student who is present).
+
+  iou=0.45    — Intersection-over-Union threshold for non-maximum suppression.
+                 Overlapping boxes above this threshold are merged into one,
+                 preventing the same person from being counted twice.
+
+  augment=True — Test-time augmentation runs inference on several transformed
+                  versions of the image (flipped, scaled) and merges the
+                  results. This improves accuracy at the cost of roughly
+                  doubling inference time.
+
+
+4.4 Person Counting and Occupancy Calculation
+----------------------------------------------
+YOLO returns a set of detected bounding boxes, each annotated with a class
+index corresponding to a category in the COCO dataset. Class index 0 in the
+COCO dataset corresponds to the "person" class. The backend filters all
+returned boxes by cls == 0 and counts the total.
+
+The raw count is then capped at the room's registered capacity:
+
+  occupancy = min(person_count, classroom.capacity)
+
+This ensures that the displayed occupancy never exceeds the physical maximum
+even if detection artefacts or overlapping people cause YOLO to return more
+boxes than seats. The capacity ceiling also prevents misleading displays to
+administrators who may be monitoring room safety.
+
+
+4.5 Image Annotation and Storage
+----------------------------------
+After inference, the annotated image is produced by drawing two text overlays
+onto the frame using OpenCV's putText function:
+
+  "Occupancy: {count}/{capacity}"
+  Current timestamp in the Africa/Lagos timezone (e.g. "26 Apr 2026, 10:45 AM")
+
+The annotated frame is then JPEG-encoded back to bytes and uploaded to
+Cloudinary under the folder "smart_classrooms/". The URL returned by Cloudinary
+is stored in the classroom's latestImage field. The previous image URL is
+simultaneously deleted from Cloudinary to prevent accumulation of orphaned files.
+
+It is important to note that this annotated occupancy image is the only image
+the system ever stores. Raw student registration photographs are never stored
+anywhere — this is discussed in detail in Chapter Six.
+
+
+4.6 Database Update and Real-time Broadcast
+---------------------------------------------
+After Cloudinary upload, the classroom document in MongoDB is updated:
+
+  occupancy   ← new person count (capped at capacity)
+  latestImage ← new Cloudinary URL
+  updated_at  ← current server timestamp
+
+The WebSocket broadcast manager then sends a "classroom_image_update" event
+to all connected clients. The event payload contains the complete updated
+classroom document. Every browser currently viewing the Dashboard page receives
+this event and immediately updates the displayed occupancy count and live image
+without any page refresh or polling.
+
+The endpoint also returns a performance metrics object in its response body,
+reporting the time taken for each stage of the pipeline in milliseconds
+(decode, inference, upload, database write, broadcast). This supports
+performance monitoring and helps diagnose bottlenecks during deployment.
+
+
+================================================================================
+CHAPTER FIVE: THE ATTENDANCE TRACKING SYSTEM
+================================================================================
+
+5.1 Overview
+-------------
+The attendance tracking system uses facial recognition to automatically identify
+enrolled students from live classroom camera frames and record their presence
+during an active session. The system is designed so that a student walking into
+a classroom during an active session will be identified and marked present
+within seconds of being captured in a camera frame, without any action required
+from either the student or the lecturer.
+
+
+5.2 Student Registration
+-------------------------
+Face recognition requires that each student's face embedding be stored in the
+database before they can be identified during a session. This registration
+process is initiated by the lecturer and completed by the student.
+
+5.2.1 Course Registration Token
+
+When a lecturer creates a course, the backend automatically generates a UUID
+registration token and associates it with the course document. This token
+serves as a one-time URL component:
+
+  https://{frontend}/register/{token}
+
+The lecturer shares this link with students — via a learning management system,
+email, or displayed in class. The link is public and requires no login,
+allowing any student to self-register without an institutional account.
+
+5.2.2 Consent Collection
+
+Before any personal data can be collected, the registration page presents three
+mandatory consent declarations. Each must be explicitly checked before the form
+can be submitted:
+
+  Biometric consent — The student acknowledges that their photographs will be
+  processed to create a facial recognition template for automated attendance.
+
+  Manual alternative acknowledgment — The student confirms they have been
+  informed that a manual attendance alternative exists and that not consenting
+  carries no academic penalty.
+
+  Age declaration — The student confirms they are 18 years of age or older,
+  or have obtained parental or guardian consent to participate.
+
+These consents are validated server-side. The backend endpoint returns a 422
+Unprocessable Entity error if any of the three consent flags is not explicitly
+set to "true" in the submitted form data. Trusting only the client-side
+checkbox validation would allow a technically capable user to bypass consent
+requirements by calling the API directly.
+
+5.2.3 Photo Upload and Embedding Extraction
+
+The student uploads between one and five clear, front-facing photographs. The
+frontend provides a drag-and-drop interface with image previews and counts the
+uploaded files against the maximum. Variety in angle and lighting across
+multiple photos improves recognition accuracy, as the system stores all
+embeddings and checks the current frame against all of them.
+
+On submission, the frontend sends a multipart/form-data POST request to:
+
+  POST /courses/{courseCode}/register
+
+containing the matric number, full name, consent flags, and image files.
+
+For each photograph, the backend performs the following operations:
+
+  a. The image bytes are loaded using face_recognition.load_image_file(),
+     which uses Pillow (PIL) internally and always produces an RGB-ordered
+     numpy array regardless of the original image format. This is the correct
+     colour order expected by the dlib face encoder.
+
+  b. face_recognition.face_encodings(rgb) is called. This function performs
+     three operations internally:
+       - Detects all face bounding boxes in the image using dlib's Histogram
+         of Oriented Gradients (HOG) face detector.
+       - Runs the 68-point facial landmark predictor on each detected face
+         to identify the positions of eyes, nose, mouth, and jaw.
+       - Extracts the face chip (aligned face region) and passes it through
+         a ResNet-based face encoder to produce a 128-dimensional float vector.
+
+  c. If no face is detected in a given photo, the backend returns a 422 error
+     specifying which photo failed. The student is asked to re-upload a
+     clearer image.
+
+  d. If a face is successfully detected and encoded, the 128-float vector is
+     added to the student's embeddings list. The image bytes are then
+     discarded. They are not written to disk, not stored in the database,
+     and not uploaded to any cloud service.
+
+At the end of processing, the student document is created or updated in MongoDB
+with the full list of embedding vectors and all consent metadata. An Enrollment
+document linking the student to the course is also created.
+
+5.2.4 Data Minimisation (NDPA s.24)
+
+The architectural decision to discard photographs immediately after encoding
+is a deliberate and non-negotiable implementation of the data minimisation
+principle under Section 24 of the Nigeria Data Protection Act 2023. The
+registered data — 128-dimensional float vectors — cannot be reverse-engineered
+into a photograph of the student's face. The transformation is mathematically
+one-way: an embedding can identify a face but cannot reconstruct it.
+
+
+5.3 Session Management
+-----------------------
+Attendance tracking operates within the context of a Session. A session
+represents one instance of a course meeting in a specific classroom.
+
+A lecturer starts a session by submitting a POST request to /sessions with the
+courseCode and classId. The backend enforces a constraint that only one session
+may be active per classroom at a time — attempting to start a second session
+in an occupied classroom returns a 409 Conflict error. When a session is
+started, a "session_started" WebSocket event is broadcast to all connected
+clients.
+
+The session remains active until the lecturer explicitly ends it via
+POST /sessions/{sessionId}/end. Once ended, the status is set to "ended" and
+an endedAt timestamp is recorded. Face recognition will no longer mark
+attendance for an ended session.
+
+
+5.4 Automatic Attendance Marking
+----------------------------------
+Automatic attendance marking is triggered by the same image endpoint that
+handles occupancy detection:
+
+  POST /classrooms/{classId}/image
+
+After YOLO completes its person count, the backend queries the database for
+an active session associated with this classId. If no active session is found,
+the face recognition pipeline is skipped entirely and the endpoint returns
+immediately after updating occupancy. This design ensures that face recognition
+compute is only expended during actual academic sessions.
+
+When an active session is found, the following pipeline executes:
+
+5.4.1 Enrolled Student Retrieval
+
+The backend fetches the list of matric numbers enrolled in the session's course
+and passes them to a specialised database query:
+
+  database.get_students_for_recognition(matric_numbers)
+
+This query filters the enrolled students to return only those for whom:
+  - embeddingsDeleted is not True (student has not withdrawn consent)
+  - embeddings array is non-empty (student has completed registration)
+
+Students who withdrew consent or did not register are automatically excluded
+from the recognition pipeline without any additional logic.
+
+5.4.2 Face Detection and Embedding Extraction
+
+face_recognition.face_locations(rgb) detects the bounding boxes of all faces
+present in the current frame. face_recognition.face_encodings(rgb, locations)
+extracts a 128-float embedding for each detected face. If the frame contains
+no faces, the pipeline exits immediately.
+
+5.4.3 Distance-Based Matching
+
+For each face detected in the current frame, the backend computes the Euclidean
+distance between the detected embedding and every stored embedding for every
+enrolled student:
+
+  distances = face_recognition.face_distance(student.embeddings, detected_embedding)
+  best_distance = min(distances)
+
+A student may have up to five stored embeddings (one per registration photo).
+The system checks against all of them and uses the best (lowest) distance.
+This means that even if one registration photo was of poor quality, a good
+match on another photo will still result in a correct identification.
+
+The match is confirmed if:
+
+  best_distance < 0.55
+
+This threshold was chosen to balance precision and recall in a controlled
+classroom environment. The Euclidean distance ranges from 0 (identical faces)
+to values above 1 (completely different faces). A threshold of 0.55 is more
+conservative than the library's default recommendation of 0.6, reducing the
+risk of false identifications in settings where consequential academic records
+are being produced.
+
+5.4.4 Attendance Record Update
+
+When a match is confirmed, database.mark_attendance() is called with the
+session ID, the matched matric number, and method="auto". This function is
+designed to be idempotent — safe to call repeatedly for the same student:
+
+  - If the student already has an attendance record that was not manually
+    overridden: the markedAt timestamp is updated to reflect the most recent
+    detection. The student is not duplicated.
+
+  - If the student has a manually overridden record (placed by the lecturer):
+    the function does nothing. The lecturer's explicit decision takes precedence
+    over the automatic system and cannot be overwritten by subsequent camera
+    frames.
+
+  - If the student has no existing record: a new AttendanceEntry is inserted
+    into the session's attendees array with method="auto".
+
+5.4.5 Real-time Broadcast
+
+If any students were newly marked in the current frame, a "attendance_update"
+WebSocket event is broadcast to all connected clients. The event payload includes
+the full updated session document and the list of newly identified matric
+numbers. The lecturer's browser reflects the updated attendance list without
+any manual refresh.
+
+
+5.5 Manual Attendance Override
+--------------------------------
+The system acknowledges that face recognition is not infallible. A student
+may be missed if they are seated at an angle the camera cannot capture, if
+lighting conditions are poor, or if their registration photos were not
+representative of their current appearance.
+
+Lecturers are provided with a manual override interface that allows them to
+explicitly mark any enrolled student as present or absent at any time during
+or after a session:
+
+  PUT /sessions/{sessionId}/attendance/{matricNumber}
+  Body: { status: "present" | "absent" }
+
+When this endpoint is called:
+  - The attendance entry is flagged with manuallyOverridden: True.
+  - If the status is "present", the entry is upserted with method="manual".
+  - If the status is "absent", the entry is removed from the attendees array
+    (absence is represented by the absence of an entry, not a flag, consistent
+    with the automatic pipeline behaviour).
+  - Once manuallyOverridden is True, subsequent automatic detections cannot
+    modify that student's record for the remainder of the session.
+
+The final attendance report for any session therefore reflects either automatic
+face recognition results or lecturer-corrected results, with the
+manuallyOverridden flag preserved in the record for audit purposes.
+
+
+================================================================================
+CHAPTER SIX: INTEGRATION OF OCCUPANCY AND ATTENDANCE
+================================================================================
+
+6.1 Shared Entry Point
+------------------------
+The occupancy detection and attendance tracking pipelines are not separate
+systems — they are two stages of a single image processing pipeline triggered
+by one HTTP request. The endpoint POST /classrooms/{classId}/image serves as
+the unified entry point for both functions.
+
+When a camera device sends an image, the backend executes the following
+sequential pipeline:
+
+  Stage 1: Image decoding (OpenCV)
+  Stage 2: YOLO inference → person count → update classroom occupancy
+  Stage 3: Check for active session
+    If no session → end pipeline, return occupancy result
+    If session found → continue to Stage 4
+  Stage 4: Face recognition → identify students → mark attendance
+  Stage 5: Annotate image with occupancy and session info
+  Stage 6: Upload annotated image to Cloudinary
+  Stage 7: Update classroom document in MongoDB
+  Stage 8: Broadcast WebSocket events
+
+
+6.2 Shared Classroom Anchor
+-----------------------------
+Both systems use the classId as their shared reference point. YOLO updates the
+occupancy of the classroom identified by classId. The face recognition pipeline
+fetches the active session for the same classId. Both pipelines therefore
+operate on the same physical space without explicit coupling — they are
+independently implemented functions that share only the classId lookup context.
+
+
+6.3 Independent Operation
+---------------------------
+Occupancy detection operates continuously regardless of whether attendance
+tracking is active. A classroom can monitor headcount at all hours without any
+course or session configured. Attendance tracking, by contrast, operates only
+when a session is explicitly started by a lecturer. This design ensures that
+face recognition is not running — and students are not being identified — outside
+of formal academic sessions, which has important implications for consent and
+data protection.
+
+The two systems also fail independently. If face_recognition or dlib is not
+installed on the deployment server, the backend logs a warning and skips the
+face recognition stage. Occupancy detection continues to function normally.
+This allows the system to be deployed in a lightweight "occupancy-only" mode
+on servers without the computational resources or dependencies required for
+face recognition.
+
+
+6.4 Combined Real-time Output
+------------------------------
+The WebSocket broadcast layer unifies the real-time output of both pipelines
+to all connected clients. The frontend Dashboard page listens for
+"classroom_image_update" events to update occupancy counts and live images.
+The CourseDetail page listens for "attendance_update" events to update the
+session attendance list. Both event types flow through the same WebSocket
+connection, so the lecturer sees a unified real-time view of their classroom's
+occupancy and attendance without managing multiple connections.
+
+
+================================================================================
+CHAPTER SEVEN: NDPA COMPLIANCE AND CONSENT MANAGEMENT
+================================================================================
+
+7.1 Data Minimisation (NDPA s.24)
+-----------------------------------
+Section 24 of the Nigeria Data Protection Act 2023 requires that personal data
+collected must be adequate, relevant, and limited to what is necessary in
+relation to the purposes for which it is processed.
+
+In the context of this system, the necessary data for automated attendance is
+the ability to recognise a student's face — not the photograph itself. The
+face_recognition library produces a 128-dimensional float vector (the embedding)
+that captures the mathematical relationships between facial features in a form
+sufficient for identity verification. This vector cannot be used to reconstruct
+or render the original face.
+
+The system therefore discards all uploaded photographs immediately after the
+embedding extraction step. No photograph is written to disk, stored in the
+database, or uploaded to cloud storage. The only biometric artifact retained is
+the embedding vector, which represents the minimum data necessary to fulfil the
+system's purpose.
+
+
+7.2 Right of Access (NDPA s.34)
+---------------------------------
+Section 34 establishes a data subject's right to obtain confirmation of whether
+personal data concerning them is being processed and to access that data.
+
+The system implements this through the student portal endpoint:
+
+  GET /students/lookup/{matricNumber}
+
+This public endpoint requires no login. Any student can enter their matric
+number and receive a complete summary of all data held about them, including:
+  - All courses they are enrolled in and their attendance rate per course
+  - A session-by-session breakdown of their attendance with dates, classroom
+    names, status (present/absent), and whether each record was manually
+    overridden
+  - Their consent record: the date consent was given, the consent version,
+    whether biometrics are currently active, and the date consent was withdrawn
+    if applicable
+
+No data about the student is withheld from this view.
+
+
+7.3 Right to Erasure (NDPA s.36)
+----------------------------------
+Section 36 establishes the right of a data subject to have their personal data
+erased without undue delay under certain circumstances, including withdrawal of
+consent.
+
+The system implements consent withdrawal through:
+
+  DELETE /courses/{courseCode}/students/biometrics
+  Body: { matricNumber: str }
+
+When this endpoint is called, the backend:
+  - Sets the student's embeddings array to empty
+  - Sets embeddingsDeleted: True
+  - Records the consentWithdrawnAt timestamp
+
+From this point forward, the student is automatically excluded from all face
+recognition queries. The embeddingsDeleted flag is checked in the database
+query that fetches students for recognition — no code change or system restart
+is required for the exclusion to take effect.
+
+The student's non-biometric records are preserved: their matric number, name,
+enrollment history, and all past attendance records remain intact. This is
+consistent with the principle that the right to erasure applies to the personal
+data that was the subject of consent (the biometric template), not to the
+administrative records of academic participation.
+
+
+7.4 Consent Version Tracking
+------------------------------
+The system records a consentVersion field alongside the consentTimestamp.
+This supports future scenarios where the consent terms are revised — for
+example, if the system is updated to process data in a new way that requires
+updated consent. The version field allows the institution to identify students
+who consented under earlier terms and request renewed consent if required.
+
+
+================================================================================
+CHAPTER EIGHT: SYSTEM TESTING
+================================================================================
+
+8.1 API Endpoint Testing
+--------------------------
+All backend API endpoints were tested systematically using curl from the command
+line with both the local backend (http://localhost:8000) and the frontend
+(http://localhost:8080). Tests covered the expected success path and relevant
+edge cases for each endpoint group.
+
+CLASSROOMS
+  GET  /classrooms                ✅ Returns list of all classrooms
+  GET  /classrooms/{classId}      ✅ Returns single classroom document
+  POST /classrooms                ✅ Creates classroom successfully
+  PUT  /classrooms/{classId}      ✅ Updates classroom fields
+  DELETE /classrooms/{classId}    ✅ Deletes classroom
+
+LECTURERS
+  GET  /lecturers                 ✅ Returns list
+  POST /lecturers                 ✅ Creates lecturer
+  GET  /lecturers/{staffId}       ✅ Returns single lecturer
+  DELETE /lecturers/{staffId}     ✅ Deletes lecturer
+
+COURSES
+  GET  /courses                   ✅ Returns list
+  POST /courses                   ✅ Creates course, returns registrationToken
+  GET  /courses/{courseCode}      ✅ Returns single course
+  PUT  /courses/{courseCode}      ✅ Updates course
+  DELETE /courses/{courseCode}    ✅ Deletes course
+
+ENROLLMENTS
+  GET  /courses/{code}/enrollments        ✅ Lists enrolled students
+  POST /courses/{code}/enrollments        ✅ Enrolls student
+  DELETE /courses/{code}/enrollments/{m}  ✅ Unenrolls student
+  Edge: Duplicate enrollment              ✅ Returns 400 "already enrolled"
+
+STUDENTS (admin)
+  GET  /students                          ✅ Lists all students
+  GET  /students/{matric}                 ✅ Returns single student
+  DELETE /students/{matric}/embeddings    ✅ Deletes embeddings globally
+  GET  /students/{matric}/enrollments     ✅ Lists student's courses
+
+SESSIONS
+  POST /sessions                          ✅ Starts session
+  GET  /sessions?courseCode=X            ✅ Lists by course
+  GET  /sessions?classId=X              ✅ Lists by classroom
+  GET  /sessions?classId=X&status=active ✅ Filters by status
+  GET  /sessions/{sessionId}             ✅ Returns single session
+  POST /sessions/{sessionId}/end         ✅ Ends session
+  GET  /sessions/{sessionId}/attendance  ✅ Returns attendance records
+  PUT  /sessions/{id}/attendance/{mat}   ✅ Manual present/absent toggle
+  Edge: End already-ended session        ✅ Returns 400 "session already ended"
+  Edge: Invalid course on start          ✅ Returns 404 "course not found"
+
+REGISTRATION
+  GET  /register/{token}                  ✅ Resolves token to course info
+  POST /courses/{code}/register           ✅ Full registration with photos
+
+STUDENT PORTAL
+  GET  /students/lookup/{matric}          ✅ Returns full attendance summary
+  Edge: Unknown matric number             ✅ Returns 404 "no student found"
+
+
+8.2 Bugs Identified and Fixed During Testing
+---------------------------------------------
+The following defects were discovered during systematic API testing:
+
+BUG 1 — DELETE /courses/{courseCode}/students/biometrics returning 422
+  The route handler was using the ManualAttendanceRequest schema, which requires
+  both a matricNumber and a present boolean field. The biometrics deletion
+  endpoint only needs a matricNumber. FastAPI's request validation therefore
+  rejected every call to this endpoint with a 422 error.
+
+  Fix: A dedicated DeleteBiometricsRequest schema was added to schemas.py
+  containing only the matricNumber field. The route handler was updated to use
+  this schema.
+
+BUG 2 — Registration form sending "[object Object]" as error message
+  FastAPI validation errors (HTTP 422) return the detail field as an array of
+  objects rather than a string. The API client's error handler performed
+  new Error(array), which JavaScript converts to the string "[object Object]".
+
+  Fix: The throwOnError helper was updated to check the type of the detail
+  field. If it is an array, the .msg property of each element is extracted and
+  joined into a human-readable string. If it is a string, it is used directly.
+
+BUG 3 — Session cards showing "1 / 0 present" instead of enrolled count
+  The transformSession function hardcoded totalStudents: 0 because the backend
+  session object does not include enrollment count. This caused the session
+  card to always display the enrolled count as zero.
+
+  Fix: After loading both session and enrollment data, the frontend now sets
+  totalStudents from the length of the loaded students array.
+
+BUG 4 — Registration failing with "Unsupported image type" from dlib
+  The dlib pre-built wheel for Windows (dlib-19.24.1-cp311-cp311-win_amd64)
+  was compiled against NumPy 1.x. The installed NumPy version was 2.4.4.
+  NumPy 2.0 changed its internal C API structure, causing dlib to misread
+  array metadata and reject all images — including synthetic test images —
+  with the above error.
+
+  Fix: NumPy was downgraded to 1.26.4, the final NumPy 1.x release for
+  Python 3.11. Both dlib and OpenCV were confirmed working after the downgrade.
+  This issue is specific to the local Windows development environment. On Linux
+  deployment platforms, dlib is compiled from source against the installed NumPy
+  version, so ABI compatibility is guaranteed automatically.
+
+
+8.3 Face Recognition Testing
+------------------------------
+Student registration was tested end-to-end with real photographs:
+  - Five photographs were uploaded via the registration form.
+  - Each photograph was processed successfully, producing a 128-float embedding.
+  - The student was enrolled in the test course.
+  - An attendance session was started for the classroom.
+  - A test image was submitted to the image endpoint simulating a camera frame.
+  - The student was correctly identified and marked present.
+  - The attendance entry appeared in the session record with method: "auto".
+  - Manual override was tested: setting the student to absent removed the entry;
+    subsequent camera frames did not re-mark the student present.
+
+
+================================================================================
+CHAPTER NINE: CONCLUSION AND FUTURE WORK
+================================================================================
+
+9.1 Conclusion
+---------------
+This project has successfully designed and implemented a smart classroom system
+that unifies real-time occupancy detection and biometric attendance tracking in
+a single, privacy-aware platform. The system demonstrates that automated
+attendance marking using face recognition can be made practical, legally
+compliant, and operationally robust in an institutional context.
+
+The dual-pipeline architecture — where YOLO and face recognition both operate
+from the same camera frame sent by a single device — maximises the utility of
+each image submission without requiring additional hardware or network calls.
+The WebSocket broadcast layer ensures that occupancy and attendance data reach
+the administrative frontend in real time, providing lecturers and administrators
+with continuous awareness of their classrooms.
+
+The NDPA-compliant consent framework, data minimisation implementation, and
+right-to-erasure endpoint demonstrate that biometric systems can be built to
+respect data subject rights by design rather than as an afterthought. The
+architectural decision to store only embedding vectors — and never photographs
+— represents a meaningful and enforceable privacy guarantee.
+
+
+9.2 Limitations
+----------------
+  i.   The face recognition matching threshold (0.55) is a fixed value. In
+       environments with challenging lighting or higher student counts, this
+       may require tuning on a per-deployment basis.
+
+  ii.  The system relies on the YOLOv8 nano model for occupancy, which trades
+       accuracy for speed. Overcrowded or poorly lit classrooms may yield
+       inaccurate counts.
+
+  iii. Admin authentication is implemented client-side without a server-side
+       session or token. This is not suitable for public-facing deployment
+       without replacement by a proper authentication system.
+
+  iv.  The student portal returns a 404 error if a student has no ended sessions,
+       rather than an empty results set. This may cause confusion for newly
+       registered students with no session history.
+
+
+9.3 Recommendations for Future Work
+-------------------------------------
+  i.   Implement server-side authentication using JWT tokens or OAuth 2.0 to
+       protect administrative endpoints from unauthorised access.
+
+  ii.  Introduce an adaptive threshold mechanism that adjusts the face matching
+       threshold based on the confidence distribution of matches observed over
+       time for a given deployment environment.
+
+  iii. Add liveness detection to the face recognition pipeline to prevent
+       spoofing attacks where a photograph of a student is held up in front of
+       the camera.
+
+  iv.  Extend the analytics module to provide aggregate attendance trends,
+       at-risk student identification (students below the 75% threshold), and
+       exportable reports in PDF and Excel formats for submission to academic
+       boards.
+
+  v.   Implement a lecturer mobile application to allow session management and
+       attendance monitoring on a smartphone rather than requiring a laptop.
+
+  vi.  Replace the hardcoded matching threshold with a configurable per-course
+       setting, allowing different courses to apply different sensitivity levels
+       based on their enrolment size and classroom layout.
+
+
+================================================================================
+REFERENCES
+================================================================================
+
+Baig, M. I., Shuib, L., & Yadegaridehkordi, E. (2019). Big data adoption:
+  State of the art and research challenges. Information Processing and
+  Management, 56(6), 102095.
+
+King, D. E. (2009). Dlib-ml: A machine learning toolkit. Journal of Machine
+  Learning Research, 10, 1755-1758.
+
+Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). You only look
+  once: Unified, real-time object detection. Proceedings of the IEEE
+  Conference on Computer Vision and Pattern Recognition (CVPR), 779-788.
+
+Shen, Z., Xu, Y., Ni, B., Wang, M., Hu, J., & Yang, X. (2021). Crowd counting
+  via adversarial cross-scale consistency pursuit. Proceedings of the IEEE
+  Conference on Computer Vision and Pattern Recognition, 5245-5254.
+
+Ultralytics (2023). YOLOv8: A new state-of-the-art computer vision model.
+  Ultralytics Documentation. https://docs.ultralytics.com
+
+Federal Republic of Nigeria (2023). Nigeria Data Protection Act 2023.
+  Official Gazette, Vol. 110, No. 63.
+
+Amos, B., Ludwiczuk, B., & Satyanarayanan, M. (2016). OpenFace: A general-
+  purpose face recognition library with mobile applications. Technical
+  Report CMU-CS-16-118, Carnegie Mellon University.
+
+================================================================================

@@ -1,10 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Union, List, Dict, Optional
 
 import env, models
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 client = AsyncIOMotorClient(env.MONGO_URI, tls=True, tlsAllowInvalidCertificates=True)
@@ -109,6 +113,17 @@ async def delete_lecturer_by_staffId(staffId: str) -> bool:
     try:
         res = await db.lecturers.delete_one({"staffId": staffId})
         return res.deleted_count == 1
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def get_lecturer_by_email(email: str) -> Union[models.Lecturer, None]:
+    """Used by auth's automatic lecturer linking (a staff address that matches an
+    existing lecturer document is promoted to role 'lecturer' on first login)."""
+    try:
+        doc = await db.lecturers.find_one({"email": email})
+        return models.Lecturer(**doc) if doc else None
     except Exception as e:
         print(e)
         throw_mongo_error()
@@ -636,3 +651,181 @@ async def get_student_portal_summary(matricNumber: str) -> List[Dict]:
     except Exception as e:
         print(e)
         throw_mongo_error()
+
+
+# -------------------------------------------------------
+# USERS (authentication)
+# -------------------------------------------------------
+async def get_user_by_email(email: str) -> Union[models.User, None]:
+    try:
+        doc = await db.users.find_one({"email": email})
+        return models.User(**doc) if doc else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def get_user_by_matric(matricNumber: str) -> Union[models.User, None]:
+    try:
+        doc = await db.users.find_one({"matricNumber": matricNumber})
+        return models.User(**doc) if doc else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def create_user(user: models.User) -> str:
+    try:
+        payload = user.model_dump(by_alias=False)
+        payload.pop("id", None)
+        result = await db.users.insert_one(payload)
+        return str(result.inserted_id)
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def update_user_role(
+    email: str,
+    role: str,
+    staffId: Optional[str] = None,
+    fullName: Optional[str] = None,
+    roleAssignedBy: Optional[str] = None,
+) -> Union[models.User, None]:
+    try:
+        update: Dict = {"role": role, "roleAssignedAt": _utcnow()}
+        if staffId is not None:
+            update["staffId"] = staffId
+        if fullName is not None:
+            update["fullName"] = fullName
+        if roleAssignedBy is not None:
+            update["roleAssignedBy"] = roleAssignedBy
+        result = await db.users.find_one_and_update(
+            {"email": email}, {"$set": update}, return_document=True
+        )
+        return models.User(**result) if result else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def update_user_fullname(email: str, fullName: str) -> Union[models.User, None]:
+    try:
+        result = await db.users.find_one_and_update(
+            {"email": email}, {"$set": {"fullName": fullName}}, return_document=True
+        )
+        return models.User(**result) if result else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def update_user_status(email: str, status_: str) -> Union[models.User, None]:
+    try:
+        result = await db.users.find_one_and_update(
+            {"email": email}, {"$set": {"status": status_}}, return_document=True
+        )
+        return models.User(**result) if result else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def update_last_login(email: str) -> None:
+    try:
+        await db.users.update_one(
+            {"email": email}, {"$set": {"lastLoginAt": _utcnow()}}
+        )
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def list_users_by_role(role: Optional[str] = None) -> List[models.User]:
+    try:
+        query = {"role": role} if role else {}
+        docs = await db.users.find(query).to_list(length=5000)
+        return [models.User(**d) for d in docs]
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+# -------------------------------------------------------
+# LOGIN CODES (authentication)
+# -------------------------------------------------------
+async def create_login_code(email: str, codeHash: str, expiresAt: datetime) -> str:
+    try:
+        login_code = models.LoginCode(email=email, codeHash=codeHash, expiresAt=expiresAt)
+        payload = login_code.model_dump(by_alias=False)
+        payload.pop("id", None)
+        result = await db.login_codes.insert_one(payload)
+        return str(result.inserted_id)
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def get_active_login_code(email: str) -> Union[models.LoginCode, None]:
+    """Most recent unconsumed code for this email, regardless of expiry —
+    callers must check expiresAt themselves (the TTL index is cleanup, not
+    enforcement; MongoDB's TTL monitor runs on roughly a 60s cycle)."""
+    try:
+        doc = await db.login_codes.find_one(
+            {"email": email, "consumedAt": None},
+            sort=[("createdAt", -1)],
+        )
+        return models.LoginCode(**doc) if doc else None
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def increment_code_attempts(login_code_id: str) -> int:
+    try:
+        result = await db.login_codes.find_one_and_update(
+            {"_id": ObjectId(login_code_id)},
+            {"$inc": {"attempts": 1}},
+            return_document=True,
+        )
+        return result["attempts"] if result else 0
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def consume_login_code(login_code_id: str) -> None:
+    try:
+        await db.login_codes.update_one(
+            {"_id": ObjectId(login_code_id)}, {"$set": {"consumedAt": _utcnow()}}
+        )
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+async def invalidate_codes_for_email(email: str) -> None:
+    """Marks any outstanding (unconsumed) codes for this email as consumed so
+    they can no longer be exchanged, per the 'invalidate on new code' rule."""
+    try:
+        await db.login_codes.update_many(
+            {"email": email, "consumedAt": None}, {"$set": {"consumedAt": _utcnow()}}
+        )
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
+# -------------------------------------------------------
+# AUTH INDEXES
+# -------------------------------------------------------
+async def create_auth_indexes() -> None:
+    """Called once at application startup by both backends. Unique index enforces
+    one user document per email; the TTL index lets MongoDB delete expired login
+    codes automatically (expiry is also checked in application code — see
+    get_active_login_code)."""
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.login_codes.create_index("expiresAt", expireAfterSeconds=0)
+    except Exception as e:
+        print(e)

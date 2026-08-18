@@ -112,23 +112,6 @@ const Attendance = () => {
     return !q || c.courseCode.toLowerCase().includes(q) || c.courseName.toLowerCase().includes(q);
   });
 
-  if (!isAdmin) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Navigation />
-        <div className="flex flex-col items-center justify-center min-h-screen gap-5 text-center px-6">
-          <BookOpen className="h-12 w-12 text-muted-foreground/40" />
-          <div>
-            <h2 className="font-serif text-3xl text-foreground mb-2">Attendance Management</h2>
-            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
-              Please log in as a lecturer to manage courses and track attendance.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
@@ -140,14 +123,16 @@ const Attendance = () => {
             <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-3">Course Management</p>
             <h1 className="font-serif text-4xl md:text-5xl text-foreground">Attendance</h1>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowCreateDialog(true)}
-            className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Create Course
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowCreateDialog(true)}
+              className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create Course
+            </button>
+          )}
         </div>
 
         <div className="h-px bg-border mb-8" />
@@ -182,17 +167,21 @@ const Attendance = () => {
             <div>
               <p className="font-serif text-2xl text-foreground mb-2">No courses yet</p>
               <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                Create your first course to start automated attendance tracking.
+                {isAdmin
+                  ? "Create your first course to start automated attendance tracking."
+                  : "No courses have been created yet."}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowCreateDialog(true)}
-              className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Create Course
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowCreateDialog(true)}
+                className="inline-flex items-center gap-2 bg-foreground text-background text-xs tracking-widest uppercase px-6 py-3 rounded-full hover:bg-foreground/90 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Create Course
+              </button>
+            )}
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center py-24 gap-3 text-center">
@@ -211,14 +200,16 @@ const Attendance = () => {
                   <span className="text-xs font-mono tracking-widest text-muted-foreground border border-border rounded px-2 py-1">
                     {course.courseCode}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setCourseToDelete(course)}
-                    className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
-                    aria-label="Delete course"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setCourseToDelete(course)}
+                      className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
+                      aria-label="Delete course"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Course name */}

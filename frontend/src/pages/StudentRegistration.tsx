@@ -1,17 +1,22 @@
 // =============================================================================
-// PAGE: /register/:token  — Public student self-registration
+// PAGE: /register/:token  — Student self-registration (requires login)
 // =============================================================================
 // Flow:
-//   1. Resolve token → course via GET /attendance/register/:token  (public)
-//   2. Student reads the privacy notice, checks BOTH consent checkboxes
-//   3. Student enters matric number and uploads passport photo(s)
-//   4. Submit → POST /attendance/courses/:courseId/register  (multipart/form-data)
+//   1. Route is gated by ProtectedRoute allowedRoles=["student"] — a logged-
+//      out visitor is redirected to /login?redirect=/register/:token and
+//      lands back here after verifying.
+//   2. Resolve token → course via GET /register/:token (requires student login)
+//   3. Student reads the privacy notice, checks all three consent checkboxes
+//   4. Student uploads passport photo(s) — matric number and name come from
+//      the logged-in account, shown read-only, never entered here
+//   5. Submit → POST /courses/:courseCode/register  (multipart/form-data)
 //        Fields:
-//          matricNumber       (string)
 //          photos             (File[] — up to 5 JPEG/PNG)
 //          biometricConsent   ("true")
 //          manualAltConsent   ("true")
 //          ageConsent         ("true")
+//        matricNumber/fullName are taken from the caller's own JWT on the
+//        backend — a student can only ever register their own face.
 //
 // =============================================================================
 // BACKEND ENFORCEMENT — POST /attendance/courses/:courseId/register
@@ -78,13 +83,13 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Camera, CheckCircle2, Upload, AlertCircle, RefreshCw, X, ShieldCheck, Info } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { Course } from "@/types/attendance";
 
 const MAX_PHOTOS = 5;
@@ -92,6 +97,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const StudentRegistration = () => {
   const { token } = useParams<{ token: string }>();
+  const { user } = useAuth();
 
   const [course, setCourse]           = useState<Course | null>(null);
   const [loading, setLoading]         = useState(true);
@@ -100,8 +106,6 @@ const StudentRegistration = () => {
   const [biometricConsent, setBiometricConsent] = useState(false);
   const [manualAltConsent, setManualAltConsent] = useState(false);
   const [ageConsent, setAgeConsent]             = useState(false);
-  const [matricNumber, setMatricNumber]         = useState("");
-  const [fullName, setFullName]                 = useState("");
   const [photoFiles, setPhotoFiles]             = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews]       = useState<string[]>([]);
   const [submitting, setSubmitting]             = useState(false);
@@ -161,13 +165,11 @@ const StudentRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || !matricNumber.trim() || !fullName.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
+    if (!course || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       const formData = new FormData();
-      formData.append("matricNumber", matricNumber.trim().toUpperCase());
-      formData.append("fullName", fullName.trim());
       formData.append("biometricConsent", "true");
       formData.append("manualAltConsent", "true");
       formData.append("ageConsent", "true");
@@ -442,36 +444,15 @@ const StudentRegistration = () => {
 
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Matric Number */}
+              {/* Registering as — read-only, taken from the logged-in account */}
               <div className="space-y-2">
-                <Label htmlFor="matric" className="text-xs tracking-widest uppercase text-muted-foreground">
-                  Matric Number
+                <Label className="text-xs tracking-widest uppercase text-muted-foreground">
+                  Registering As
                 </Label>
-                <Input
-                  id="matric"
-                  placeholder="e.g. 190403014"
-                  value={matricNumber}
-                  onChange={(e) => setMatricNumber(e.target.value)}
-                  required
-                  disabled={!biometricConsent}
-                  className="font-mono bg-background"
-                />
-              </div>
-
-              {/* Full Name */}
-              <div className="space-y-2">
-                <Label htmlFor="fullName" className="text-xs tracking-widest uppercase text-muted-foreground">
-                  Full Name
-                </Label>
-                <Input
-                  id="fullName"
-                  placeholder="e.g. Chukwuemeka Obi"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  required
-                  disabled={!biometricConsent}
-                  className="bg-background"
-                />
+                <div className="rounded-md border border-border bg-foreground/[0.03] px-3 py-2.5">
+                  <p className="font-mono text-sm text-foreground">{user?.matricNumber}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{user?.fullName}</p>
+                </div>
               </div>
 
               {/* Multi-photo Upload */}
@@ -553,7 +534,7 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || !matricNumber.trim() || !fullName.trim() || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
+                disabled={submitting || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
               >
                 {submitting ? (
                   <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>

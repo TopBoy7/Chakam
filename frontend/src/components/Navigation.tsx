@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const Navigation = () => {
   const location = useLocation();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -27,6 +27,7 @@ const Navigation = () => {
         { to: "/students", label: "Students" },
         { to: "/attendance", label: "Attendance" },
         { to: "/my-attendance", label: "My Attendance" },
+        ...(user?.role === "admin" ? [{ to: "/admin/users", label: "Users" }] : []),
       ]
     : [
         { to: "/", label: "Home" },
@@ -44,6 +45,8 @@ const Navigation = () => {
       return location.pathname === "/lecturers";
     if (to === "/students")
       return location.pathname === "/students";
+    if (to === "/admin/users")
+      return location.pathname === "/admin/users";
     return location.pathname === to;
   };
 

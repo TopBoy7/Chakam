@@ -120,3 +120,64 @@ class EmailService:
 """
 
         return EmailService.send_email(to_email, subject, body, html=True)
+
+    @staticmethod
+    def send_login_code(to_email: str, code: str, ttl_minutes: int = 10) -> bool:
+        subject = f"Your Chakam login code: {code}"
+
+        body = f"""
+<!DOCTYPE html>
+<html>
+  <body style="margin:0; padding:0; background-color:#f9fafb; font-family: Arial, Helvetica, sans-serif;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td align="center" style="padding:40px 16px;">
+          <table width="100%" style="max-width:520px; background:#ffffff; border-radius:8px; padding:24px;">
+
+            <tr>
+              <td align="center" style="padding-bottom:16px;">
+                <img src="https://res.cloudinary.com/dtgigdp2j/image/upload/v1765901415/random/cam_ldfi1n.png" alt="Chakam" width="48" height="48" />
+              </td>
+            </tr>
+
+            <tr>
+              <td align="center">
+                <h2 style="margin:0 0 16px; color:#111827;">
+                  Your Login Code
+                </h2>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="color:#374151; font-size:15px; line-height:1.6;" align="center">
+                <p style="margin:0 0 16px;">
+                  Enter this code to finish signing in to Chakam:
+                </p>
+                <p style="margin:0 0 16px; font-size:32px; font-weight:bold; letter-spacing:8px; color:#111827;">
+                  {code}
+                </p>
+                <p style="margin:0;">
+                  This code expires in {ttl_minutes} minutes. If you did not
+                  request it, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding-top:24px; border-top:1px solid #e5e7eb;">
+                <p style="margin:0; font-size:13px; color:#6b7280; text-align:center;">
+                  Smart Classroom System<br />
+                  <strong>Chakam</strong>
+                </p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
+"""
+
+        return EmailService.send_email(to_email, subject, body, html=True)

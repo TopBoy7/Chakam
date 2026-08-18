@@ -8,6 +8,8 @@ backend/evaluation/
 # Local deployment/help docs (not part of the app — keep out of the repo)
 CHAKAM_GUIDE.md
 CHANGES_AND_TESTING.md
+AUTH_CHANGES.md
+REMAINING_WORK.md
 AZURE_HOSTING_GUIDE.md
 AZURE_DEPLOY_FROM_DNS.md
 EMAIL_SETUP.md

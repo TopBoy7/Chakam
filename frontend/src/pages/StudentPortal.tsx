@@ -1,15 +1,18 @@
 // =============================================================================
-// PAGE: /my-attendance  — Public student self-service portal
+// PAGE: /my-attendance  — Student self-service portal (requires login)
 // =============================================================================
 // Flow:
-//   1. Student enters their matric number (no auth required — public page)
-//   2. GET /attendance/students/lookup/:matricNumber
-//        Returns StudentAttendanceSummary[] — one entry per enrolled course
+//   1. Route is gated by ProtectedRoute allowedRoles=["student"] — a logged-
+//      out visitor is redirected to /login?redirect=/my-attendance and lands
+//      back here after verifying.
+//   2. GET /students/lookup/:matricNumber, called automatically with the
+//      logged-in student's own matric number — never typed in
 //   3. Shows per-course attendance rate with 75% threshold indicator
 //   4. Expandable session log per course
 //
-// BACKEND NOTE for /attendance/students/lookup/:matricNumber:
-//   - Public endpoint — no auth header required
+// BACKEND NOTE for GET /students/lookup/:matricNumber:
+//   - Requires login (self-or-admin — a student can only look up their own
+//     matric number; an admin may pass any)
 //   - Case-insensitive matric match (normalize to uppercase on both ends)
 //   - Return shape:
 //     {
@@ -38,9 +41,7 @@
 //   - If matric number not found in any course → 404 with detail message
 // =============================================================================
 
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useEffect, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -51,6 +52,7 @@ import {
 import { AlertCircle, ChevronDown, ChevronRight, Search, Trash2, ShieldCheck, ShieldOff } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import type { StudentAttendanceSummary } from "@/types/attendance";
 
 const THRESHOLD = 0.75;
@@ -72,8 +74,8 @@ function fmt(dateStr: string): string {
 }
 
 const StudentPortal = () => {
-  const [matric, setMatric]           = useState("");
-  const [loading, setLoading]         = useState(false);
+  const { user } = useAuth();
+  const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState<string | null>(null);
   const [results, setResults]         = useState<StudentAttendanceSummary[] | null>(null);
   const [expanded, setExpanded]       = useState<Record<string, boolean>>({});
@@ -85,33 +87,39 @@ const StudentPortal = () => {
   const [deleteError, setDeleteError]       = useState<string | null>(null);
   const [deletedCourses, setDeletedCourses] = useState<Set<string>>(new Set());
 
-  const handleLookup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!matric.trim()) return;
-    setLoading(true);
-    setError(null);
-    setResults(null);
-    setExpanded({});
-    setCourseQuery("");
-    try {
-      const data = await api.attendance.portal.lookup(matric);
-      setResults(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No records found for this matric number.");
-    } finally {
+  // Page is behind ProtectedRoute allowedRoles=["student"], so a matric
+  // number is always present here — no more typing one in, load it as soon
+  // as the logged-in user's identity is known.
+  useEffect(() => {
+    const matric = user?.matricNumber;
+    if (!matric) {
       setLoading(false);
+      return;
     }
-  };
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.attendance.portal.lookup(matric);
+        setResults(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load your attendance record.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.matricNumber]);
 
   const toggle = (courseId: string) =>
     setExpanded((prev) => ({ ...prev, [courseId]: !prev[courseId] }));
 
   const handleDeleteBiometrics = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !user?.matricNumber) return;
     setDeleting(true);
     setDeleteError(null);
     try {
-      await api.attendance.students.deleteBiometrics(deleteTarget.courseId, matric);
+      await api.attendance.students.deleteBiometrics(deleteTarget.courseId, user.matricNumber);
       setDeletedCourses((prev) => new Set(prev).add(deleteTarget.courseId));
       setDeleteTarget(null);
     } catch (err) {
@@ -132,49 +140,27 @@ const StudentPortal = () => {
           <p className="text-xs tracking-widest uppercase text-muted-foreground mb-3">Student Portal</p>
           <h1 className="font-serif text-4xl md:text-5xl leading-tight mb-4">My Attendance</h1>
           <p className="text-muted-foreground text-sm leading-relaxed max-w-md">
-            Enter your matric number to view your attendance record across all your registered courses.
+            Your attendance record across all your registered courses.
           </p>
         </div>
 
-        {/* Lookup form */}
-        <form onSubmit={handleLookup} className="space-y-4 mb-10">
-          <div className="space-y-2">
-            <Label htmlFor="matric" className="text-xs tracking-widest uppercase text-muted-foreground">
-              Matric Number
-            </Label>
-            <div className="flex gap-3">
-              <Input
-                id="matric"
-                placeholder="e.g. 190403014"
-                value={matric}
-                onChange={(e) => setMatric(e.target.value)}
-                className="font-mono bg-background flex-1"
-                required
-              />
-              <button
-                type="submit"
-                disabled={loading || !matric.trim()}
-                className="bg-foreground text-background text-xs tracking-widest uppercase px-6 py-2.5 rounded-full hover:bg-foreground/90 transition-colors disabled:opacity-40 flex items-center gap-2 whitespace-nowrap"
-              >
-                {loading
-                  ? <><div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-current border-t-transparent" />Searching…</>
-                  : <><Search className="h-3.5 w-3.5" />Look Up</>
-                }
-              </button>
-            </div>
-          </div>
+        {error && (
+          <Alert variant="destructive" className="mb-8">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-        </form>
+        {loading && (
+          <div className="flex flex-col items-center py-16 gap-4">
+            <div className="h-8 w-8 rounded-full border-2 border-border border-t-foreground animate-spin" />
+            <p className="text-sm text-muted-foreground tracking-wide">Loading your attendance…</p>
+          </div>
+        )}
 
         {/* Results */}
         {/* Course filter — only visible after results load */}
-        {results && results.length > 0 && (
+        {!loading && results && results.length > 0 && (
           <div className="relative mb-6">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <input

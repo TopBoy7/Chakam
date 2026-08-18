@@ -247,7 +247,7 @@ const LecturersPage = () => {
                 <Input
                   id="lecturerEmail"
                   type="email"
-                  placeholder="a.obi@university.edu.ng"
+                  placeholder="a.obi@unilag.edu.ng"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-10 bg-background"

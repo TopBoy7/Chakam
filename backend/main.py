@@ -1,15 +1,17 @@
 from fastapi import (
     FastAPI, HTTPException, status,
     UploadFile, File, Form, Response, WebSocket, WebSocketDisconnect, Query,
-    BackgroundTasks
+    BackgroundTasks, Depends
 )
 from fastapi.middleware.cors import CORSMiddleware
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from typing import List, Optional
 from io import BytesIO
+import asyncio
+import json
 import os
 import cv2
 import numpy as np
@@ -17,7 +19,7 @@ import logging
 import time
 import uuid
 
-import database, models, schemas, env
+import database, models, schemas, env, auth
 from send_email import EmailService
 
 
@@ -109,6 +111,11 @@ class ConnectionManager:
         self.active.append(ws)
         logger.info("WS connected: total=%d", len(self.active))
 
+    def join(self, ws: WebSocket):
+        """Register an already-accepted, already-authenticated socket."""
+        self.active.append(ws)
+        logger.info("WS connected: total=%d", len(self.active))
+
     def disconnect(self, ws: WebSocket):
         if ws in self.active:
             self.active.remove(ws)
@@ -157,6 +164,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.on_event("startup")
+async def create_indexes():
+    await database.create_auth_indexes()
+
+
 @app.get("/healthz")
 async def healthz():
     """Health probe for the Azure load balancer / uptime monitor."""
@@ -172,7 +184,22 @@ async def healthz():
 # -------------------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    await manager.connect(ws)
+    # Browsers can't set headers on a WS handshake, so the token travels as the
+    # first message instead. The server closes any connection that hasn't
+    # authenticated within 5 seconds.
+    await ws.accept()
+    try:
+        first = await asyncio.wait_for(ws.receive_text(), timeout=5.0)
+        token = json.loads(first).get("token", "")
+        claims = auth.decode_token(token)
+        user = await database.get_user_by_email(claims.get("sub", ""))
+        if not user or user.status == "suspended":
+            raise ValueError("invalid or suspended user")
+    except Exception:
+        await ws.close(code=4001)
+        return
+
+    manager.join(ws)
     try:
         while True:
             try:
@@ -194,7 +221,10 @@ async def websocket_endpoint(ws: WebSocket):
 # CREATE CLASSROOM
 # -------------------------------------------------------
 @app.post("/classrooms", response_model=schemas.ResponseModel)
-async def create_classroom(req: schemas.CreateClassroomRequest):
+async def create_classroom(
+    req: schemas.CreateClassroomRequest,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     existing = await database.get_classroom_by_classId(req.classId)
     if existing:
         raise HTTPException(409, "classId already exists")
@@ -213,7 +243,7 @@ async def create_classroom(req: schemas.CreateClassroomRequest):
 # LIST CLASSROOMS
 # -------------------------------------------------------
 @app.get("/classrooms", response_model=schemas.ResponseModel)
-async def get_classrooms():
+async def get_classrooms(_user: models.User = Depends(auth.require_role(*auth.ACTIVE_ROLES))):
     docs = await database.list_classrooms()
     return {
         "success": True,
@@ -226,7 +256,10 @@ async def get_classrooms():
 # GET ONE CLASSROOM
 # -------------------------------------------------------
 @app.get("/classrooms/{classId}", response_model=schemas.ResponseModel)
-async def get_classroom(classId: str):
+async def get_classroom(
+    classId: str,
+    _user: models.User = Depends(auth.require_role(*auth.ACTIVE_ROLES)),
+):
     doc = await database.get_classroom_by_classId(classId)
     if not doc:
         raise HTTPException(404, "classroom not found")
@@ -246,6 +279,7 @@ async def update_classroom(
     classId: str,
     req: schemas.UpdateClassroomRequest,
     background_tasks: BackgroundTasks,
+    _admin: models.User = Depends(auth.require_role("admin")),
 ):
     payload = {k: v for k, v in req.model_dump().items() if v is not None}
     existing = await database.get_classroom_by_classId(classId)
@@ -306,7 +340,10 @@ async def update_classroom(
 # DELETE CLASSROOM
 # -------------------------------------------------------
 @app.delete("/classrooms/{classId}", response_model=schemas.ResponseModel)
-async def delete_classroom(classId: str):
+async def delete_classroom(
+    classId: str,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     ok = await database.delete_classroom_by_classId(classId)
     if not ok:
         raise HTTPException(404, "classroom not found")
@@ -543,7 +580,10 @@ async def upload_image(
 # LECTURERS
 # -------------------------------------------------------
 @app.post("/lecturers", response_model=schemas.ResponseModel, status_code=status.HTTP_201_CREATED)
-async def create_lecturer(req: schemas.CreateLecturerRequest):
+async def create_lecturer(
+    req: schemas.CreateLecturerRequest,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     existing = await database.get_lecturer_by_staffId(req.staffId)
     if existing:
         raise HTTPException(409, "staffId already exists")
@@ -559,7 +599,7 @@ async def create_lecturer(req: schemas.CreateLecturerRequest):
 
 
 @app.get("/lecturers", response_model=schemas.ResponseModel)
-async def list_lecturers():
+async def list_lecturers(_admin: models.User = Depends(auth.require_role("admin"))):
     docs = await database.list_lecturers()
     return {
         "success": True,
@@ -569,7 +609,10 @@ async def list_lecturers():
 
 
 @app.get("/lecturers/{staffId}", response_model=schemas.ResponseModel)
-async def get_lecturer(staffId: str):
+async def get_lecturer(
+    staffId: str,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     doc = await database.get_lecturer_by_staffId(staffId)
     if not doc:
         raise HTTPException(404, "lecturer not found")
@@ -581,7 +624,10 @@ async def get_lecturer(staffId: str):
 
 
 @app.delete("/lecturers/{staffId}", response_model=schemas.ResponseModel)
-async def delete_lecturer(staffId: str):
+async def delete_lecturer(
+    staffId: str,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     ok = await database.delete_lecturer_by_staffId(staffId)
     if not ok:
         raise HTTPException(404, "lecturer not found")
@@ -592,7 +638,10 @@ async def delete_lecturer(staffId: str):
 # COURSES
 # -------------------------------------------------------
 @app.post("/courses", response_model=schemas.ResponseModel, status_code=status.HTTP_201_CREATED)
-async def create_course(req: schemas.CreateCourseRequest):
+async def create_course(
+    req: schemas.CreateCourseRequest,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     existing = await database.get_course_by_courseCode(req.courseCode)
     if existing:
         raise HTTPException(409, "courseCode already exists")
@@ -616,7 +665,10 @@ async def create_course(req: schemas.CreateCourseRequest):
 
 
 @app.get("/courses", response_model=schemas.ResponseModel)
-async def list_courses(lecturerId: Optional[str] = Query(default=None)):
+async def list_courses(
+    lecturerId: Optional[str] = Query(default=None),
+    _user: models.User = Depends(auth.require_role(*auth.ACTIVE_ROLES)),
+):
     docs = await database.list_courses(lecturerId=lecturerId)
     return {
         "success": True,
@@ -626,7 +678,10 @@ async def list_courses(lecturerId: Optional[str] = Query(default=None)):
 
 
 @app.get("/courses/{courseCode}", response_model=schemas.ResponseModel)
-async def get_course(courseCode: str):
+async def get_course(
+    courseCode: str,
+    _user: models.User = Depends(auth.require_role(*auth.ACTIVE_ROLES)),
+):
     doc = await database.get_course_by_courseCode(courseCode)
     if not doc:
         raise HTTPException(404, "course not found")
@@ -638,7 +693,11 @@ async def get_course(courseCode: str):
 
 
 @app.put("/courses/{courseCode}", response_model=schemas.ResponseModel)
-async def update_course(courseCode: str, req: schemas.UpdateCourseRequest):
+async def update_course(
+    courseCode: str,
+    req: schemas.UpdateCourseRequest,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     existing = await database.get_course_by_courseCode(courseCode)
     if not existing:
         raise HTTPException(404, "course not found")
@@ -661,7 +720,10 @@ async def update_course(courseCode: str, req: schemas.UpdateCourseRequest):
 
 
 @app.delete("/courses/{courseCode}", response_model=schemas.ResponseModel)
-async def delete_course(courseCode: str):
+async def delete_course(
+    courseCode: str,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
     ok = await database.delete_course_by_courseCode(courseCode)
     if not ok:
         raise HTTPException(404, "course not found")
@@ -676,6 +738,7 @@ async def register_student(
     matricNumber: str = Form(...),
     fullName: str = Form(...),
     photos: List[UploadFile] = File(...),
+    _admin: models.User = Depends(auth.require_role("admin")),
 ):
     """Register a student by extracting face embeddings from uploaded photos.
     Photos are processed in memory — never written to disk or cloud.
@@ -731,7 +794,7 @@ async def register_student(
 
 
 @app.get("/students", response_model=schemas.ResponseModel)
-async def list_students():
+async def list_students(_admin: models.User = Depends(auth.require_role("admin"))):
     docs = await database.list_students()
     # Strip embeddings from the list response — large and not useful to display
     safe = [
@@ -742,7 +805,10 @@ async def list_students():
 
 
 @app.get("/students/{matricNumber}", response_model=schemas.ResponseModel)
-async def get_student(matricNumber: str):
+async def get_student(
+    matricNumber: str,
+    _user: models.User = Depends(auth.require_self_or_admin),
+):
     doc = await database.get_student_by_matric(matricNumber)
     if not doc:
         raise HTTPException(404, "student not found")
@@ -751,7 +817,10 @@ async def get_student(matricNumber: str):
 
 
 @app.delete("/students/{matricNumber}/embeddings", response_model=schemas.ResponseModel)
-async def delete_student_embeddings(matricNumber: str):
+async def delete_student_embeddings(
+    matricNumber: str,
+    _user: models.User = Depends(auth.require_self_or_admin),
+):
     """Withdraw biometric consent — deletes stored face vectors.
     The student record itself is kept; only embeddings are wiped."""
     ok = await database.delete_student_embeddings(matricNumber)
@@ -772,10 +841,15 @@ async def delete_student_embeddings(matricNumber: str):
     response_model=schemas.ResponseModel,
     status_code=status.HTTP_201_CREATED,
 )
-async def enroll_student(courseCode: str, req: schemas.EnrollStudentRequest):
+async def enroll_student(
+    courseCode: str,
+    req: schemas.EnrollStudentRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
     course = await database.get_course_by_courseCode(courseCode)
     if not course:
         raise HTTPException(404, "course not found")
+    auth.assert_course_access(course, user)
 
     student = await database.get_student_by_matric(req.matricNumber)
     if not student:
@@ -799,7 +873,16 @@ async def enroll_student(courseCode: str, req: schemas.EnrollStudentRequest):
     "/courses/{courseCode}/enrollments/{matricNumber}",
     response_model=schemas.ResponseModel,
 )
-async def unenroll_student(courseCode: str, matricNumber: str):
+async def unenroll_student(
+    courseCode: str,
+    matricNumber: str,
+    user: models.User = Depends(auth.get_current_user),
+):
+    course = await database.get_course_by_courseCode(courseCode)
+    if not course:
+        raise HTTPException(404, "course not found")
+    auth.assert_course_access(course, user)
+
     ok = await database.delete_enrollment(courseCode, matricNumber)
     if not ok:
         raise HTTPException(404, "enrollment not found")
@@ -807,10 +890,14 @@ async def unenroll_student(courseCode: str, matricNumber: str):
 
 
 @app.get("/courses/{courseCode}/enrollments", response_model=schemas.ResponseModel)
-async def list_course_enrollments(courseCode: str):
+async def list_course_enrollments(
+    courseCode: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     course = await database.get_course_by_courseCode(courseCode)
     if not course:
         raise HTTPException(404, "course not found")
+    auth.assert_course_access(course, user)
 
     enrollments = await database.list_enrollments_by_course(courseCode)
     return {
@@ -821,7 +908,10 @@ async def list_course_enrollments(courseCode: str):
 
 
 @app.get("/students/{matricNumber}/enrollments", response_model=schemas.ResponseModel)
-async def list_student_enrollments(matricNumber: str):
+async def list_student_enrollments(
+    matricNumber: str,
+    _user: models.User = Depends(auth.require_self_or_admin),
+):
     student = await database.get_student_by_matric(matricNumber)
     if not student:
         raise HTTPException(404, "student not found")
@@ -838,10 +928,14 @@ async def list_student_enrollments(matricNumber: str):
 # SESSIONS
 # -------------------------------------------------------
 @app.post("/sessions", response_model=schemas.ResponseModel, status_code=status.HTTP_201_CREATED)
-async def start_session(req: schemas.StartSessionRequest):
+async def start_session(
+    req: schemas.StartSessionRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
     course = await database.get_course_by_courseCode(req.courseCode)
     if not course:
         raise HTTPException(404, "course not found")
+    auth.assert_course_access(course, user)
 
     classroom = await database.get_classroom_by_classId(req.classId)
     if not classroom:
@@ -880,7 +974,16 @@ async def list_sessions(
     classId: Optional[str] = Query(default=None),
     courseCode: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    user: models.User = Depends(auth.require_role("lecturer", "admin")),
 ):
+    # No single course to check against an unfiltered/classId-only listing —
+    # ownership is only enforced when the caller filters by a specific course.
+    if courseCode:
+        course = await database.get_course_by_courseCode(courseCode)
+        if not course:
+            raise HTTPException(404, "course not found")
+        auth.assert_course_access(course, user)
+
     docs = await database.list_sessions(classId=classId, courseCode=courseCode, status=status)
     return {
         "success": True,
@@ -890,10 +993,14 @@ async def list_sessions(
 
 
 @app.get("/sessions/{sessionId}", response_model=schemas.ResponseModel)
-async def get_session(sessionId: str):
+async def get_session(
+    sessionId: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     doc = await database.get_session_by_sessionId(sessionId)
     if not doc:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(doc, user)
     return {
         "success": True,
         "message": "ok",
@@ -902,10 +1009,14 @@ async def get_session(sessionId: str):
 
 
 @app.put("/sessions/{sessionId}/end", response_model=schemas.ResponseModel)
-async def end_session(sessionId: str):
+async def end_session(
+    sessionId: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
     if session.status == "ended":
         raise HTTPException(400, "session already ended")
 
@@ -927,10 +1038,14 @@ async def end_session(sessionId: str):
 # ATTENDANCE
 # -------------------------------------------------------
 @app.get("/sessions/{sessionId}/attendance", response_model=schemas.ResponseModel)
-async def get_attendance(sessionId: str):
+async def get_attendance(
+    sessionId: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
     return {
         "success": True,
         "message": "ok",
@@ -948,12 +1063,17 @@ async def get_attendance(sessionId: str):
 
 
 @app.post("/sessions/{sessionId}/attendance", response_model=schemas.ResponseModel)
-async def manual_attendance(sessionId: str, req: schemas.ManualAttendanceRequest):
+async def manual_attendance(
+    sessionId: str,
+    req: schemas.ManualAttendanceRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
     """Manually mark a student present or absent.
     Overrides auto-recognition for this student in this session."""
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
 
     student = await database.get_student_by_matric(req.matricNumber)
     if not student:
@@ -986,7 +1106,10 @@ async def manual_attendance(sessionId: str, req: schemas.ManualAttendanceRequest
 # REGISTRATION TOKEN RESOLUTION
 # -------------------------------------------------------
 @app.get("/register/{token}", response_model=schemas.ResponseModel)
-async def resolve_registration_token(token: str):
+async def resolve_registration_token(
+    token: str,
+    _user: models.User = Depends(auth.require_role("student")),
+):
     """Resolve a course registrationToken to a course object.
     Called by the student registration page on load."""
     doc = await database.get_course_by_token(token)
@@ -1000,11 +1123,15 @@ async def resolve_registration_token(token: str):
 # COURSE-SCOPED STUDENT LIST
 # -------------------------------------------------------
 @app.get("/courses/{courseCode}/students", response_model=schemas.ResponseModel)
-async def list_enrolled_students(courseCode: str):
+async def list_enrolled_students(
+    courseCode: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     """Return all students enrolled in a course with their profile details."""
     course = await database.get_course_by_courseCode(courseCode)
     if not course:
         raise HTTPException(404, "course not found")
+    auth.assert_course_access(course, user)
     students = await database.get_enrolled_students_details(courseCode)
     return {"success": True, "message": "ok", "data": {"students": students}}
 
@@ -1019,15 +1146,17 @@ async def list_enrolled_students(courseCode: str):
 )
 async def register_student_for_course(
     courseCode: str,
-    matricNumber: str = Form(...),
-    fullName: str = Form(...),
     biometricConsent: str = Form(...),
     manualAltConsent: str = Form(...),
     ageConsent: str = Form(...),
     photos: List[UploadFile] = File(...),
+    user: models.User = Depends(auth.require_role("student")),
 ):
-    """Student self-registration. Validates consent, extracts face embeddings
-    from uploaded photos (in memory only — never saved), creates enrollment."""
+    """Student self-registration. Matric number and full name come from the
+    authenticated user's own token — never from the request — so a student
+    can only ever register their own face. Validates consent, extracts face
+    embeddings from uploaded photos (in memory only — never saved), creates
+    enrollment."""
     if biometricConsent != "true":
         raise HTTPException(422, "biometric consent is required")
     if manualAltConsent != "true":
@@ -1039,7 +1168,8 @@ async def register_student_for_course(
     if not course:
         raise HTTPException(404, "course not found")
 
-    matric = matricNumber.strip().upper()
+    matric = user.matricNumber
+    fullName = user.fullName
 
     existing_enrollment = await database.get_enrollment(courseCode, matric)
     if existing_enrollment:
@@ -1094,10 +1224,16 @@ async def register_student_for_course(
 # COURSE-SCOPED BIOMETRICS DELETION
 # -------------------------------------------------------
 @app.delete("/courses/{courseCode}/students/biometrics", response_model=schemas.ResponseModel)
-async def delete_course_student_biometrics(courseCode: str, req: schemas.DeleteBiometricsRequest):
+async def delete_course_student_biometrics(
+    courseCode: str,
+    req: schemas.DeleteBiometricsRequest,
+    user: models.User = Depends(auth.get_current_user),
+):
     """Delete a student's face embeddings for consent withdrawal (NDPA s.36).
     Body: { matricNumber: string }"""
     matric = req.matricNumber.strip().upper()
+    if user.role != "admin" and user.matricNumber != matric:
+        raise HTTPException(403, "not permitted")
     ok = await database.delete_student_embeddings_for_course(courseCode, matric)
     if not ok:
         raise HTTPException(404, "student enrollment not found")
@@ -1108,11 +1244,15 @@ async def delete_course_student_biometrics(courseCode: str, req: schemas.DeleteB
 # SESSION END — POST alias (frontend uses POST, core logic is PUT)
 # -------------------------------------------------------
 @app.post("/sessions/{sessionId}/end", response_model=schemas.ResponseModel)
-async def end_session_post(sessionId: str):
+async def end_session_post(
+    sessionId: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     """POST alias for ending a session — some clients prefer POST over PUT."""
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
     if session.status == "ended":
         raise HTTPException(400, "session already ended")
     ended = await database.end_session(sessionId)
@@ -1127,12 +1267,18 @@ async def end_session_post(sessionId: str):
     "/sessions/{sessionId}/attendance/{matricNumber}",
     response_model=schemas.ResponseModel,
 )
-async def update_student_attendance(sessionId: str, matricNumber: str, req: dict):
+async def update_student_attendance(
+    sessionId: str,
+    matricNumber: str,
+    req: dict,
+    user: models.User = Depends(auth.get_current_user),
+):
     """Set a single student's attendance status. Body: { status: 'present' | 'absent' }
     Sets manuallyOverridden=True so face recognition won't overwrite it."""
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
 
     status_value = req.get("status")
     if status_value not in {"present", "absent"}:
@@ -1163,10 +1309,14 @@ async def update_student_attendance(sessionId: str, matricNumber: str, req: dict
 # This endpoint just returns the latest attendance for the active session.
 # -------------------------------------------------------
 @app.post("/sessions/{sessionId}/capture", response_model=schemas.ResponseModel)
-async def capture_attendance(sessionId: str):
+async def capture_attendance(
+    sessionId: str,
+    user: models.User = Depends(auth.get_current_user),
+):
     session = await database.get_session_by_sessionId(sessionId)
     if not session:
         raise HTTPException(404, "session not found")
+    await auth.assert_session_access(session, user)
     if session.status != "active":
         raise HTTPException(400, "session is not active")
 
@@ -1190,11 +1340,186 @@ async def capture_attendance(sessionId: str):
 # STUDENT PORTAL LOOKUP
 # -------------------------------------------------------
 @app.get("/students/lookup/{matricNumber}", response_model=schemas.ResponseModel)
-async def student_portal_lookup(matricNumber: str):
-    """Public endpoint — no auth required.
-    Returns attendance summary across all courses for a student."""
+async def student_portal_lookup(
+    matricNumber: str,
+    _user: models.User = Depends(auth.require_self_or_admin),
+):
+    """Returns attendance summary across all courses for a student. Reads the
+    matric number from the caller's own token; an explicit matric belonging
+    to someone else is only permitted for an admin (NDPA s.34 right of access
+    — this is now delivered to the verified data subject, not any caller who
+    knows a matric number)."""
     matric = matricNumber.strip().upper()
     results = await database.get_student_portal_summary(matric)
     if not results:
         raise HTTPException(404, "no student found with this matric number")
-    return {"success": True, "message": "ok", "data": {"results": results}}
+
+    target_user = await database.get_user_by_matric(matric)
+    identity = {
+        "email": target_user.email if target_user else None,
+        "role": target_user.role if target_user else None,
+        "emailVerifiedAt": target_user.emailVerifiedAt.isoformat() if target_user else None,
+        "lastLoginAt": target_user.lastLoginAt.isoformat() if target_user and target_user.lastLoginAt else None,
+    }
+    return {"success": True, "message": "ok", "data": {"results": results, "identity": identity}}
+
+
+# =========================================================
+# AUTHENTICATION (Phase 1 — not yet enforced on any route above)
+# =========================================================
+def _user_out(user: models.User) -> dict:
+    return {
+        "email": user.email,
+        "role": user.role,
+        "status": user.status,
+        "matricNumber": user.matricNumber,
+        "staffId": user.staffId,
+        "fullName": user.fullName,
+        "emailVerifiedAt": user.emailVerifiedAt.isoformat(),
+        "createdAt": user.createdAt.isoformat(),
+        "lastLoginAt": user.lastLoginAt.isoformat() if user.lastLoginAt else None,
+    }
+
+
+@app.post("/auth/request-code", response_model=schemas.ResponseModel)
+async def request_code(req: schemas.RequestCodeRequest, request: Request):
+    email = auth.normalize_email(req.email)
+    classification = await auth.classify_email(email)
+    if classification is None:
+        raise HTTPException(403, "must be a UNILAG address")
+
+    client_ip = request.client.host if request.client else "unknown"
+    auth.check_request_code_rate_limit(email, client_ip)
+
+    await database.invalidate_codes_for_email(email)
+    code = auth.generate_code()
+    expires_at = auth.utcnow() + timedelta(minutes=auth.LOGIN_CODE_TTL_MINUTES)
+    await database.create_login_code(email, auth.hash_code(code), expires_at)
+    EmailService.send_login_code(email, code, auth.LOGIN_CODE_TTL_MINUTES)
+
+    return {
+        "success": True,
+        "message": "If this address is eligible, a login code has been sent.",
+        "data": None,
+    }
+
+
+@app.post("/auth/verify-code", response_model=schemas.ResponseModel)
+async def verify_code(req: schemas.VerifyCodeRequest):
+    email = auth.normalize_email(req.email)
+    code = req.code.strip()
+
+    login_code = await database.get_active_login_code(email)
+    if not login_code or login_code.expiresAt < auth.utcnow():
+        raise HTTPException(400, "invalid or expired code")
+
+    if login_code.attempts >= auth.MAX_VERIFY_ATTEMPTS:
+        raise HTTPException(429, "too many attempts, request a new code")
+
+    if not auth.verify_code(code, login_code.codeHash):
+        await database.increment_code_attempts(login_code.id)
+        raise HTTPException(400, "invalid or expired code")
+
+    await database.consume_login_code(login_code.id)
+
+    classification = await auth.classify_email(email)
+    if classification is None:
+        raise HTTPException(403, "must be a UNILAG address")
+    role, matricNumber, staffId = classification
+
+    user = await database.get_user_by_email(email)
+    if not user:
+        user = models.User(
+            email=email,
+            role=role,
+            matricNumber=matricNumber,
+            staffId=staffId,
+        )
+        await database.create_user(user)
+        user = await database.get_user_by_email(email)
+    elif email in env.ADMIN_EMAILS and user.role != "admin":
+        # Re-asserted on every login per §3.5 — removing an address from
+        # ADMIN_EMAILS does not silently demote it; that must be explicit.
+        await database.update_user_role(email, "admin")
+        user = await database.get_user_by_email(email)
+
+    await database.update_last_login(email)
+    user.lastLoginAt = auth.utcnow()
+
+    token = auth.create_token(user)
+    return {
+        "success": True,
+        "message": "ok",
+        "data": {"token": token, "user": _user_out(user)},
+    }
+
+
+@app.get("/auth/me", response_model=schemas.ResponseModel)
+async def get_me(user: models.User = Depends(auth.get_current_user)):
+    return {"success": True, "message": "ok", "data": {"user": _user_out(user)}}
+
+
+@app.patch("/auth/me", response_model=schemas.ResponseModel)
+async def update_me(
+    req: schemas.UpdateMeRequest, user: models.User = Depends(auth.get_current_user)
+):
+    updated = await database.update_user_fullname(user.email, req.fullName)
+    return {"success": True, "message": "ok", "data": {"user": _user_out(updated)}}
+
+
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout():
+    # Stateless JWTs — the client discards the token. Present for symmetry and
+    # for a future revocation list.
+    return None
+
+
+@app.get("/admin/users", response_model=schemas.ResponseModel)
+async def list_users(
+    role: Optional[str] = Query(None),
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
+    docs = await database.list_users_by_role(role)
+    return {"success": True, "message": "ok", "data": {"users": [_user_out(d) for d in docs]}}
+
+
+@app.put("/admin/users/{email}/role", response_model=schemas.ResponseModel)
+async def assign_role(
+    email: str,
+    req: schemas.AssignRoleRequest,
+    admin: models.User = Depends(auth.require_role("admin")),
+):
+    target_email = auth.normalize_email(email)
+    if target_email == admin.email and req.role != "admin":
+        raise HTTPException(403, "cannot demote your own account")
+
+    updated = await database.update_user_role(
+        target_email, req.role, staffId=req.staffId, fullName=req.fullName,
+        roleAssignedBy=admin.email,
+    )
+    if not updated:
+        raise HTTPException(404, "user not found")
+
+    if req.role == "lecturer" and req.staffId:
+        existing = await database.get_lecturer_by_staffId(req.staffId)
+        if not existing:
+            lecturer = models.Lecturer(
+                staffId=req.staffId,
+                fullName=req.fullName or updated.fullName or target_email,
+                email=target_email,
+            )
+            await database.add_lecturer(lecturer)
+
+    return {"success": True, "message": "ok", "data": {"user": _user_out(updated)}}
+
+
+@app.put("/admin/users/{email}/status", response_model=schemas.ResponseModel)
+async def set_user_status(
+    email: str,
+    req: schemas.SetStatusRequest,
+    _admin: models.User = Depends(auth.require_role("admin")),
+):
+    updated = await database.update_user_status(auth.normalize_email(email), req.status)
+    if not updated:
+        raise HTTPException(404, "user not found")
+    return {"success": True, "message": "ok", "data": {"user": _user_out(updated)}}

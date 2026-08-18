@@ -1,0 +1,915 @@
+================================================================================
+  CHAKAM — SMART CLASSROOM SYSTEM
+  TECHNICAL OVERVIEW & ARCHITECTURE DOCUMENT
+================================================================================
+
+  Last updated: 2026-04-26
+
+
+================================================================================
+  1. WHAT IS CHAKAM?
+================================================================================
+
+Chakam is a Smart Classroom Occupancy Detection and Attendance Management
+System. It combines two independent but connected pipelines:
+
+  1. Real-time occupancy monitoring — using YOLOv8 object detection to count
+     how many people are physically present in a classroom at any given moment.
+
+  2. Automatic attendance tracking — using face recognition to identify which
+     enrolled students are in an active session and mark them present without
+     any manual input from the lecturer.
+
+Both pipelines run from the same image endpoint. When a device (camera) sends
+an image to the backend, YOLO runs first to count people and update occupancy.
+If there is an active attendance session for that classroom, face recognition
+runs next on the same frame to identify and mark students.
+
+The system also provides:
+  - A student self-registration portal where students upload their own photos
+    and give biometric consent before being enrolled in a course.
+  - A student-facing attendance portal where any student can look up their own
+    attendance record using only their matric number.
+  - Consent management built to comply with Nigeria's Data Protection Act (NDPA)
+    2023, including the right to erasure (deleting face data) and the right of
+    access (viewing all stored data and consent records).
+
+
+================================================================================
+  2. TECHNOLOGY STACK
+================================================================================
+
+BACKEND
+  Language:         Python 3.11
+  Framework:        FastAPI (async, ASGI)
+  Server:           Uvicorn
+  Database:         MongoDB Atlas (cloud) via Motor (async driver)
+  Image storage:    Cloudinary (annotated images only — never raw photos)
+  Object detection: Ultralytics YOLOv8 (yolov8n.pt — nano model)
+  Face recognition: face_recognition library + dlib (19.24.1)
+  Image processing: OpenCV (cv2) + Pillow (PIL)
+  Real-time comms:  WebSocket (built into FastAPI/Starlette)
+  Data validation:  Pydantic v2
+  Env management:   python-dotenv
+
+FRONTEND
+  Language:         TypeScript
+  Framework:        React 18
+  Build tool:       Vite 5
+  UI components:    ShadCN UI (Radix UI primitives + Tailwind CSS)
+  Routing:          React Router v6
+  Charts:           Recharts
+  HTTP:             Native fetch API (no Axios)
+  Auth:             JWT bearer token (localStorage), plus a legacy admin
+                    password path kept working in parallel — see section 8.
+  Real-time:        WebSocket with exponential backoff reconnection,
+                    authenticated with a first-message token handshake
+
+DATABASE
+  Engine:     MongoDB Atlas (cloud-hosted, TLS)
+  Database:   smartclassDB
+  Collections:
+    - classrooms
+    - lecturers
+    - courses
+    - students
+    - enrollments
+    - sessions
+    - users          (added for authentication — see section 4)
+    - login_codes     (added for authentication — see section 4)
+
+DEPLOYMENT TOPOLOGY — TWO BACKEND PROCESSES
+  Chakam actually runs as two independent FastAPI processes sharing one
+  MongoDB database and one set of support modules (models.py, database.py,
+  env.py, send_email.py, auth.py):
+    - backend/main.py        "Heavy" backend. Runs YOLO + face_recognition.
+                              Reachable directly by camera firmware.
+    - backend/main-light.py  "Light" backend. Proxies the image-upload and
+                              face-registration endpoints to the heavy
+                              backend over HTTP, and independently
+                              re-implements every other route itself (talking
+                              to the same MongoDB directly, not through the
+                              heavy backend).
+  Both processes register the same route surface and the same auth
+  dependencies — a request behaves identically regardless of which one
+  handles it, except for the three heavy-only endpoints the light backend
+  forwards.
+
+  A third, separate app lives in mailer/ — a small Next.js service that
+  sends email via Gmail/nodemailer. The backend does not send SMTP directly;
+  it POSTs to the mailer's /api/send over HTTPS (MAILER_URL, MAILER_SECRET).
+  This is what both capacity-alert emails and login codes go through.
+
+
+================================================================================
+  3. REPOSITORY STRUCTURE
+================================================================================
+
+  Chakam/
+  ├── backend/
+  │   ├── main.py               Heavy backend — all FastAPI routes, YOLO +
+  │   │                        face_recognition, core logic
+  │   ├── main-light.py          Light backend — same route surface, forwards
+  │   │                        image/registration to the heavy backend,
+  │   │                        re-implements everything else itself
+  │   ├── auth.py                Authentication: email classification, one-
+  │   │                        time codes, JWT issue/decode, role and
+  │   │                        course/session-ownership dependencies
+  │   ├── models.py             Pydantic data models (MongoDB documents)
+  │   ├── schemas.py            Request/response validation schemas
+  │   ├── database.py           All async MongoDB operations
+  │   ├── env.py                Environment variable loading and validation
+  │   ├── send_email.py         Email via the mailer/ service (capacity
+  │   │                        alerts and login codes)
+  │   ├── requirements.txt      Python dependencies (full stack)
+  │   ├── requirements-light.txt  Dependencies without YOLO/face_recognition
+  │   ├── .env                  Local environment secrets (not committed)
+  │   └── tests/
+  │       └── test_api_endpoints.py
+  │
+  ├── mailer/                    Standalone Next.js service — the only thing
+  │                             that sends real email (nodemailer/Gmail),
+  │                             called by send_email.py over HTTPS
+  │
+  ├── frontend/
+  │   ├── src/
+  │   │   ├── pages/
+  │   │   │   ├── Home.tsx              Landing page + legacy admin login
+  │   │   │   ├── Login.tsx             Email + one-time-code login
+  │   │   │   ├── PendingApproval.tsx   Holding screen for unassigned staff
+  │   │   │   ├── AdminUsers.tsx        Approve/assign roles, suspend accounts
+  │   │   │   ├── Dashboard.tsx         Classroom overview + live monitoring
+  │   │   │   ├── Attendance.tsx        Course management + session hub
+  │   │   │   ├── ClassroomDetail.tsx   Per-classroom details + sessions
+  │   │   │   ├── CourseDetail.tsx      Course details + enrollments
+  │   │   │   ├── StudentRegistration.tsx  Public student face registration
+  │   │   │   ├── StudentPortal.tsx     Public attendance self-lookup
+  │   │   │   ├── StudentsPage.tsx      Admin student management
+  │   │   │   ├── LecturersPage.tsx     Admin lecturer management
+  │   │   │   ├── Analytics.tsx         Attendance charts + export
+  │   │   │   └── NotFound.tsx
+  │   │   ├── components/
+  │   │   │   ├── Navigation.tsx
+  │   │   │   ├── ClassroomCard.tsx
+  │   │   │   ├── CreateClassroomDialog.tsx
+  │   │   │   ├── EditClassroomDialog.tsx
+  │   │   │   ├── ProtectedRoute.tsx    Role-based route guard
+  │   │   │   ├── StatsCard.tsx
+  │   │   │   └── ui/               50+ ShadCN UI components
+  │   │   ├── contexts/
+  │   │   │   └── AuthContext.tsx    Token + user auth state
+  │   │   ├── hooks/
+  │   │   │   ├── useClassroomWebSocket.ts  Live update hook (token-authed)
+  │   │   │   ├── use-mobile.tsx
+  │   │   │   └── use-toast.ts
+  │   │   ├── lib/
+  │   │   │   ├── api.ts            Centralized API client (auth-aware fetch)
+  │   │   │   ├── exportAttendance.ts  CSV/JSON/PDF/DOCX export
+  │   │   │   └── utils.ts
+  │   │   └── types/
+  │   │       ├── attendance.ts     Course, Session, Attendance types
+  │   │       ├── classroom.ts      Classroom type
+  │   │       ├── lecturer.ts       Lecturer type
+  │   │       └── auth.ts           User, UserRole, UserStatus types
+  │   ├── .env                  Frontend environment variables
+  │   ├── vite.config.ts
+  │   └── package.json
+  │
+  ├── firmware/                 IoT device firmware (camera endpoints)
+  ├── proxy-backend/            Lightweight proxy server
+  ├── api_test_review.txt       Full API test log with bugs and fixes
+  ├── AUTH_CHANGES.md           Full change log for the authentication work
+  │                            (local reference — gitignored, like this file)
+  └── about_system.txt          This file
+
+
+================================================================================
+  4. DATA MODELS
+================================================================================
+
+CLASSROOM
+  classId        string   Unique identifier (e.g. "LG-LAB")
+  className      string   Display name
+  deviceId       string   ID of the physical camera device
+  capacity       int      Maximum room capacity
+  occupancy      int      Current people count (updated by YOLO)
+  latestImage    string   Cloudinary URL of most recent annotated frame
+  created_at     datetime
+  updated_at     datetime
+
+LECTURER
+  staffId        string   Unique staff identifier
+  fullName       string
+  email          string
+  createdAt      datetime
+
+COURSE
+  courseCode         string   Unique code (e.g. "CSC101")
+  courseName         string
+  lecturerId         string   Optional reference to a Lecturer
+  registrationToken  string   UUID generated on creation (for self-registration link)
+  createdAt          datetime
+
+STUDENT
+  matricNumber        string   Unique matric number
+  fullName            string
+  embeddings          array    List of 128-float face embedding vectors (up to 5)
+  biometricConsent    bool
+  manualAltConsent    bool
+  ageConsent          bool
+  consentTimestamp    datetime
+  consentVersion      string   (e.g. "1.0")
+  embeddingsDeleted   bool     True after consent withdrawal
+  consentWithdrawnAt  datetime Optional
+  registeredAt        datetime
+
+ENROLLMENT
+  courseCode     string   Reference to Course
+  matricNumber   string   Reference to Student
+  enrolledAt     datetime
+
+USER  (collection: users — authentication)
+  email              string   Normalised (lowercased, trimmed), unique index
+  role               string   "student" | "lecturer" | "admin" | "pending"
+  status             string   "active" | "suspended"
+  matricNumber       string   Optional. Students only — captured from the
+                              email local part on first login.
+  staffId            string   Optional. Lecturers only — links to the
+                              lecturers collection above.
+  fullName           string   Collected at first login, or set by an admin.
+  emailVerifiedAt    datetime
+  createdAt          datetime
+  lastLoginAt        datetime Optional
+  roleAssignedBy     string   Optional. Email of the admin who set the role.
+  roleAssignedAt     datetime Optional
+
+LOGIN CODE  (collection: login_codes — authentication)
+  email        string     Normalised
+  codeHash     string     SHA-256 of the six-digit one-time code. Never
+                          stored in plaintext.
+  expiresAt    datetime   TTL-indexed (expireAfterSeconds=0) — also checked
+                          in application code, since MongoDB's TTL monitor
+                          runs on roughly a 60-second cycle.
+  attempts     int        Incremented on each failed verification.
+  consumedAt   datetime   Optional. Set on successful exchange; blocks reuse.
+  createdAt    datetime
+
+SESSION
+  sessionId      string   UUID
+  courseCode     string   Which course this session belongs to
+  classId        string   Which classroom the session is running in
+  classroomName  string   Stored at start time for display
+  startedAt      datetime
+  endedAt        datetime   Optional — null while active
+  status         string   "active" | "ended"
+  attendees      array    List of AttendanceEntry objects
+
+ATTENDANCE ENTRY (embedded in Session.attendees)
+  matricNumber       string
+  fullName           string
+  markedAt           datetime
+  method             string   "auto" | "manual"
+  manuallyOverridden bool     Prevents face recognition from updating
+
+
+================================================================================
+  5. THE OCCUPANCY SYSTEM (YOLO)
+================================================================================
+
+PURPOSE
+  Track how many people are physically present in each classroom at any moment.
+  This is separate from attendance — occupancy counts everyone in the room
+  (students, lecturers, visitors), not just enrolled students.
+
+HOW IT WORKS
+
+  Step 1 — Image capture
+    A physical device (camera/Raspberry Pi/IoT device) sends a POST request to:
+      POST /classrooms/{classId}/image
+    with a JPEG or PNG image as multipart form data. The request also includes
+    a deviceId field which must match the classroom's registered deviceId —
+    this ensures only the authorised device for that room can update it.
+
+  Step 2 — Image decoding
+    The backend reads the raw bytes and decodes the image with OpenCV
+    (cv2.imdecode). If decoding fails the request is rejected with a 400 error.
+
+  Step 3 — YOLO inference
+    The YOLOv8 nano model (yolov8n.pt) is loaded lazily on the first request
+    and cached in app.state.yolo_model for all subsequent requests. Running it
+    on every request would add a multi-second startup cost each time.
+
+    Inference is run in a thread pool executor (asyncio.run_in_executor) so it
+    does not block the FastAPI event loop during the CPU-heavy inference.
+
+    Call parameters:
+      model.predict(img, imgsz=1920, conf=0.25, iou=0.45, augment=True)
+
+    - imgsz=1920: processes the image at up to 1920px — higher accuracy for
+      distant or small people
+    - conf=0.25: detection confidence threshold — boxes below 25% confidence
+      are discarded
+    - iou=0.45: IoU threshold for non-maximum suppression — removes duplicate
+      boxes for the same person
+    - augment=True: test-time augmentation — runs inference on flipped/scaled
+      versions of the image and merges results for better accuracy
+
+  Step 4 — Person counting
+    YOLO returns bounding boxes, each with a class index. Class 0 in the COCO
+    dataset is "person". The backend counts how many boxes have class == 0.
+
+    Occupancy is capped at the room's capacity:
+      occupancy = min(person_count, classroom.capacity)
+
+    This prevents the displayed occupancy from exceeding the physical maximum
+    even if YOLO detects more boxes than seats (e.g. overlapping detections).
+
+  Step 5 — Annotation
+    The backend draws two lines of text onto the image:
+      - "Occupancy: {count}/{capacity}"
+      - Current timestamp in Lagos time (Africa/Lagos timezone)
+    Color: light blue (234, 241, 246 in BGR). The annotated frame is then
+    JPEG-encoded back to bytes.
+
+  Step 6 — Cloudinary upload
+    The annotated image is uploaded to Cloudinary under the folder
+    "smart_classrooms/". The old image URL is replaced in the database.
+    The previous image is deleted from Cloudinary at the same time to avoid
+    accumulating orphaned files.
+
+  Step 7 — Database update
+    The classroom document is updated with:
+      occupancy: new_count
+      latestImage: new_cloudinary_url
+      updated_at: now
+
+  Step 8 — WebSocket broadcast
+    The backend sends a "classroom_image_update" event over WebSocket to all
+    connected frontend clients. The event payload includes the full updated
+    classroom document. Every browser viewing the Dashboard immediately sees
+    the new occupancy number and the new annotated image without refreshing.
+
+PERFORMANCE
+  The endpoint returns timing metrics for every request:
+    decode_ms           Image decode time (typically 15–30ms)
+    inference_ms        YOLO inference time (typically 200–500ms)
+    face_recognition_ms FR pipeline time (800–1500ms, only when session active)
+    cloudinary_ms       Upload time (300–600ms)
+    db_ms               MongoDB write time (10–50ms)
+    ws_broadcast_ms     WebSocket broadcast (5–20ms)
+    total_ms            End-to-end total
+
+
+================================================================================
+  6. THE ATTENDANCE TRACKING SYSTEM (FACE RECOGNITION)
+================================================================================
+
+PURPOSE
+  Automatically identify which enrolled students are present in a classroom
+  during an active session, and mark their attendance without any manual input.
+
+HOW IT WORKS — STUDENT REGISTRATION
+
+  Before face recognition can identify a student, the student must register
+  and upload their face photos. This happens through a public self-registration
+  page linked to a specific course.
+
+  Step 1 — Lecturer creates a course
+    When a course is created, the backend automatically generates a UUID
+    registrationToken and stores it. The lecturer copies the registration link:
+      https://{frontend}/register/{token}
+
+  Step 2 — Student visits the registration page
+    The frontend resolves the token:
+      GET /register/{token}
+    and retrieves the course name to display on the page.
+
+  Step 3 — Consent
+    The student is presented with three mandatory consent checkboxes:
+      1. Biometric consent — I understand photos will be used to create a
+         facial recognition template.
+      2. Manual alternative acknowledgment — I understand manual attendance
+         is available and not consenting carries no academic penalty.
+      3. Age declaration — I confirm I am 18+ or have parental consent.
+    All three must be checked. The backend validates this server-side —
+    the frontend check alone is not trusted.
+
+  Step 4 — Photo upload
+    The student uploads 1 to 5 clear front-facing photos. Different angles
+    and lighting conditions improve recognition accuracy. The frontend allows
+    drag-and-drop and shows previews of all uploaded images.
+
+  Step 5 — Embedding extraction (backend)
+    POST /courses/{courseCode}/register (multipart form)
+
+    For each photo:
+      a. The image bytes are loaded using face_recognition.load_image_file()
+         which uses PIL internally and always produces an RGB numpy array.
+      b. face_recognition.face_encodings(rgb) is called, which:
+         - Detects the face location using dlib's HOG face detector
+         - Runs the 68-point facial landmark predictor
+         - Passes the face chip through dlib's ResNet face encoder
+         - Returns a 128-dimensional float vector (the face embedding)
+      c. If no face is detected in a photo, a 422 error is returned telling
+         the student which photo failed.
+      d. The embedding vector is added to the student's embeddings list.
+
+  DATA MINIMISATION (NDPA s.24):
+    The uploaded photos are NEVER written to disk.
+    The uploaded photos are NEVER uploaded to Cloudinary.
+    Only the 128-float embedding vectors are stored in MongoDB.
+    The image bytes are discarded immediately after encoding.
+    This means a student's face cannot be reconstructed from stored data.
+
+  Step 6 — Student document creation
+    The backend creates (or updates) a student document in MongoDB with:
+      - Full name and matric number
+      - The list of embedding vectors (one per photo)
+      - All three consent flags set to True
+      - Consent timestamp and version
+    An Enrollment record linking the student to the course is also created.
+
+HOW IT WORKS — SESSION AND ATTENDANCE
+
+  Step 1 — Lecturer starts a session
+    POST /sessions
+    Body: { courseCode, classId }
+
+    The backend checks that no other session is currently active for that
+    classroom (one classroom, one active session at a time). A new Session
+    document is created with status "active". A "session_started" WebSocket
+    event is broadcast to all connected clients.
+
+  Step 2 — Device streams images
+    The same POST /classrooms/{classId}/image endpoint that handles YOLO
+    occupancy also triggers face recognition. After YOLO counts people, the
+    backend checks:
+      database.get_active_session_by_classId(classId)
+
+    If no active session exists → face recognition is skipped entirely.
+    If an active session exists → face recognition pipeline runs.
+
+  Step 3 — Face detection in the live frame
+    The current frame (already decoded as a numpy array) is passed to:
+      face_recognition.face_locations(rgb)
+    This detects the bounding boxes of all faces in the image.
+
+  Step 4 — Embedding extraction from the frame
+    face_recognition.face_encodings(rgb, known_face_locations=locs)
+    This extracts a 128-float embedding for each detected face in the frame.
+
+  Step 5 — Comparison against enrolled students
+    The backend fetches all enrolled students for the active session's course
+    from MongoDB, filtering out any student where embeddingsDeleted == True
+    (students who withdrew consent are excluded automatically).
+
+    For each face detected in the current frame:
+      For each enrolled student:
+        distances = face_recognition.face_distance(
+            student.embeddings,  # list of up to 5 reference vectors
+            detected_embedding   # current frame embedding
+        )
+        best_distance = min(distances)
+
+      THRESHOLD CHECK: if best_distance < 0.55:
+        → Student identified as present
+        → database.mark_attendance(sessionId, matricNumber, method="auto")
+
+    The threshold 0.55 was chosen through testing. A lower threshold (e.g.
+    0.4) would reduce false positives but miss more genuine matches. A higher
+    threshold (e.g. 0.7) accepts more matches but risks false identifications.
+    0.55 is a balanced default for controlled classroom environments.
+
+  Step 6 — Mark attendance (idempotent)
+    The mark_attendance database function is designed to be safe to call
+    multiple times for the same student in the same session:
+      - If the student already has an attendance record that was NOT manually
+        overridden: update the markedAt timestamp (refresh the detection time).
+      - If the student has a manually overridden record: do nothing. The
+        lecturer's manual decision is final and face recognition cannot undo it.
+      - If the student has no record yet: insert a new AttendanceEntry.
+    This means even if the camera sends images every few seconds, the same
+    student is not marked multiple times — they are simply re-confirmed.
+
+  Step 7 — Broadcast attendance update
+    If any new students were marked in this frame, a "attendance_update"
+    WebSocket event is broadcast to all connected clients. The payload includes
+    the updated session state and the list of newly marked matric numbers. The
+    lecturer's browser updates the attendance list in real-time.
+
+  Step 8 — Manual override
+    PUT /sessions/{sessionId}/attendance/{matricNumber}
+    Body: { status: "present" | "absent" }
+
+    A lecturer can manually set any student as present or absent at any time
+    during or after a session:
+      - Sets manuallyOverridden: True on the attendance entry
+      - If status is "present": upserts the entry with method="manual"
+      - If status is "absent": removes the entry from the attendees array
+        (absent is represented by absence, not a flag)
+      - Once manually overridden, face recognition will never modify that
+        student's record for the rest of the session
+
+  Step 9 — End session
+    POST /sessions/{sessionId}/end
+
+    Sets status: "ended" and endedAt: now. Once ended, face recognition on
+    subsequent images will no longer mark attendance for this session. The
+    attendance record is frozen.
+
+CONSENT WITHDRAWAL (NDPA s.36 — Right to Erasure)
+  DELETE /courses/{courseCode}/students/biometrics
+  Body: { matricNumber }
+
+  Execution:
+    - Sets embeddings: [] (clears all stored vectors)
+    - Sets embeddingsDeleted: True
+    - Sets consentWithdrawnAt: now()
+    - The student document is NOT deleted — only biometric data is erased
+    - All past attendance records are preserved
+    - Future face recognition queries skip this student entirely
+    - The student portal will still show their full attendance history
+
+
+================================================================================
+  7. HOW OCCUPANCY AND ATTENDANCE ARE CONNECTED
+================================================================================
+
+They share one endpoint, one physical device, and one classroom.
+
+  Single image endpoint:
+    POST /classrooms/{classId}/image
+
+    This single endpoint does both jobs from the same image in one request:
+      1. Run YOLO → count people → update occupancy
+      2. Check for active session → if found, run face recognition → mark attendance
+
+  Shared classroom context:
+    Both systems are anchored to a classId. When a camera device sends an
+    image, it identifies itself by classId and deviceId. The YOLO result
+    updates that classroom's occupancy. The face recognition check looks for
+    an active session with that same classId. The two systems do not know about
+    each other — they both independently read and write through the classroom
+    as a shared anchor.
+
+  One does NOT require the other:
+    - Occupancy updates run always, regardless of whether there is an active
+      session. A classroom can track occupancy 24/7 with no courses configured.
+    - Attendance tracking only runs when a session is active. If no session is
+      active, face recognition is completely skipped (no compute wasted).
+
+  They share the same real-time channel:
+    Both the occupancy update and the attendance update are broadcast over the
+    same WebSocket connection. The frontend listens for two events:
+      "classroom_image_update"  → update occupancy + latest image in Dashboard
+      "attendance_update"       → update attendance list in CourseDetail page
+
+  Practical classroom flow:
+    1. Camera continuously sends images (e.g. every 10-30 seconds)
+    2. Dashboard always shows live headcount (occupancy from YOLO)
+    3. Before class: lecturer starts a session via the Attendance page
+    4. During class: same camera images now also trigger face recognition
+    5. Students are marked present automatically as they are detected
+    6. Lecturer can monitor the attendance list updating in real-time
+    7. After class: lecturer ends the session
+    8. Occupancy continues updating; attendance is now frozen
+
+
+================================================================================
+  8. FRONTEND ARCHITECTURE
+================================================================================
+
+API CLIENT (src/lib/api.ts)
+  All HTTP calls go through a single centralized api object. No component
+  calls fetch directly. This means the base URL, error handling, and data
+  transformation are defined in one place.
+
+  Error handling (throwOnError):
+    FastAPI returns validation errors as an array of objects under "detail".
+    A plain new Error(array) would produce "[object Object]". throwOnError
+    parses the response body and extracts human-readable messages from both
+    string and array detail formats.
+
+  Transform functions:
+    Raw MongoDB documents use snake_case or unusual field names. Transform
+    functions (transformCourse, transformSession, etc.) normalize them into
+    typed TypeScript interfaces that the frontend works with.
+
+AUTH CONTEXT (src/contexts/AuthContext.tsx)
+  Real server-side authentication as of the auth work (Phases 1-3 of
+  auth_design.txt — see AUTH_CHANGES.md for the full change log). A student
+  or staff member logs in with their UNILAG email and a one-time code sent by
+  mail (POST /auth/request-code, POST /auth/verify-code); the backend issues
+  a JWT, stored in localStorage and sent as an Authorization: Bearer header on
+  every request. AuthContext exposes { token, user, loading, isAdmin,
+  loginWithToken, logout, refreshUser }. The user object is never trusted from
+  a cache — it is re-fetched from GET /auth/me on every mount.
+
+  The legacy VITE_ADMIN_PASSWORD path (client-side password comparison,
+  no token) still exists in parallel — a login() function kept for backward
+  compatibility, feeding into the same isAdmin flag
+  (isAdmin = legacyPasswordLogin || user?.role === "admin"). It has not been
+  removed yet; that is Phase 4 of the auth work.
+
+  Role is never trusted from the JWT claim on the backend — auth.py's
+  get_current_user dependency re-reads the role from MongoDB on every
+  request, so a promotion, suspension, or role change by an admin takes
+  effect immediately rather than waiting for the token to expire.
+
+WEBSOCKET HOOK (src/hooks/useClassroomWebSocket.ts)
+  Manages the WebSocket connection lifecycle:
+    - Auto-connects on mount
+    - Sends the JWT as the connection's first message
+      (JSON.stringify({ token })) — the backend closes any connection that
+      hasn't authenticated within 5 seconds, since browsers cannot set
+      headers on a WebSocket handshake
+    - Sends a ping message every 25 seconds to keep the connection alive
+      (prevents proxy/load balancer idle timeout disconnects)
+    - On disconnect: reconnects with exponential backoff starting at 1 second,
+      doubling each time up to a maximum of 30 seconds — the token is re-sent
+      as the first message on every reconnect
+    - Cleans up on component unmount
+
+ROUTING (src/App.tsx)
+  Public routes (no auth required):
+    /                     Home page + legacy admin-password login (see
+                          KNOWN LIMITATIONS below — kept as a temporary
+                          developer testing fallback, not yet removed)
+    /login                Real email + one-time-code login
+
+  Requires being logged in as any active (non-pending) role — redirects to
+  /login?redirect=<path> if logged out (returning here after verifying), or
+  to /pending-approval if the account has no role assigned yet:
+    /dashboard             Classroom overview (was public before the auth
+                           work — GET /classrooms now requires login)
+    /classroom/:classId    Classroom detail
+    /attendance            Course + session management
+    /attendance/course/:courseId   Course detail
+
+  Requires being logged in as a student specifically
+  (ProtectedRoute allowedRoles={["student"]}) — same redirect-and-return
+  behaviour. Both were public/unauthenticated before the auth work's final
+  phase; a student can now only ever register or view their own record,
+  never anyone else's, since the matric number comes from the token instead
+  of a typed-in value or URL parameter:
+    /register/:token       Student self-registration
+    /my-attendance         Student portal — shows the logged-in student's
+                           own record automatically, no matric entry
+
+  Admin-only (ProtectedRoute allowedRoles={["admin"]}):
+    /lecturers             Lecturer management
+    /students              Student management
+    /admin/users           Approve pending accounts, assign roles
+
+  /pending-approval        Holding screen for a verified staff account with
+                           no role assigned yet.
+
+  NOTE ON PATHS: this section previously listed /classrooms/:classId (plural)
+  and /courses/:courseCode as the classroom/course detail routes. Those were
+  wrong — the app has always used /classroom/:classId (singular) and
+  /attendance/course/:courseId. Corrected above.
+
+ENVIRONMENT VARIABLES (frontend/.env)
+  VITE_API_BASE_URL     Backend HTTP base URL
+  VITE_WS_URL           Backend WebSocket base URL
+  VITE_ADMIN_PASSWORD   Legacy admin login password — still active, removed
+                        in Phase 4 of the auth work
+
+
+================================================================================
+  9. API ENDPOINT REFERENCE
+================================================================================
+
+CLASSROOMS
+  GET    /classrooms                        List all classrooms
+  POST   /classrooms                        Create classroom
+  GET    /classrooms/{classId}              Get single classroom
+  PUT    /classrooms/{classId}              Update classroom
+  DELETE /classrooms/{classId}              Delete classroom
+  POST   /classrooms/{classId}/image        YOLO occupancy + face recognition
+
+LECTURERS
+  GET    /lecturers                         List all lecturers
+  POST   /lecturers                         Create lecturer
+  GET    /lecturers/{staffId}               Get single lecturer
+  DELETE /lecturers/{staffId}               Delete lecturer
+
+COURSES
+  GET    /courses                           List all courses
+  POST   /courses                           Create course (generates token)
+  GET    /courses/{courseCode}              Get single course
+  PUT    /courses/{courseCode}              Update course
+  DELETE /courses/{courseCode}              Delete course
+
+ENROLLMENTS
+  GET    /courses/{courseCode}/enrollments              List enrolled students
+  POST   /courses/{courseCode}/enrollments              Enroll a student
+  DELETE /courses/{courseCode}/enrollments/{matric}     Unenroll a student
+
+STUDENTS (admin)
+  GET    /students                          List all students
+  GET    /students/{matricNumber}           Get single student
+  DELETE /students/{matricNumber}/embeddings  Delete global embeddings
+  GET    /students/{matricNumber}/enrollments  List student's course enrollments
+
+SESSIONS
+  POST   /sessions                          Start a new session
+  GET    /sessions?courseCode=X             List sessions by course
+  GET    /sessions?classId=X               List sessions by classroom
+  GET    /sessions?classId=X&status=active  Filter by status
+  GET    /sessions/{sessionId}              Get single session
+  POST   /sessions/{sessionId}/end          End a session
+  GET    /sessions/{sessionId}/attendance   Get all attendance records
+  PUT    /sessions/{sessionId}/attendance/{matric}  Manual present/absent toggle
+  POST   /sessions/{sessionId}/capture      Snapshot current attendees
+
+REGISTRATION (requires login as an active student)
+  GET    /register/{token}                  Resolve token to course info
+  POST   /courses/{courseCode}/register     Student self-registration (multipart).
+                                            matricNumber/fullName come from the
+                                            caller's token — not request fields
+                                            at all, so a student can only ever
+                                            register their own face.
+
+BIOMETRICS (consent withdrawal)
+  DELETE /courses/{courseCode}/students/biometrics  Erase student face data
+
+STUDENT PORTAL (requires login — self or admin)
+  GET    /students/lookup/{matricNumber}    Full attendance summary, plus an
+                                            "identity" block (email, role,
+                                            emailVerifiedAt, lastLoginAt) per
+                                            NDPA s.34. A student may only pass
+                                            their own matric number; an admin
+                                            may pass any.
+
+REAL-TIME
+  WS     /ws                               WebSocket stream — requires the
+                                           JWT as the first message sent
+                                           after the connection opens
+
+AUTHENTICATION (added by the auth work — see AUTH_CHANGES.md)
+  POST   /auth/request-code                 { email } → sends a one-time code
+  POST   /auth/verify-code                  { email, code } → { token, user }
+  GET    /auth/me                           Current user (requires login)
+  PATCH  /auth/me                           { fullName } (requires login)
+  POST   /auth/logout                       204 — stateless, client discards
+                                            the token
+
+ADMINISTRATION (admin role required)
+  GET    /admin/users                       ?role=pending|student|lecturer|admin
+  PUT    /admin/users/{email}/role          { role, staffId?, fullName? } —
+                                            an admin cannot demote their own
+                                            account
+  PUT    /admin/users/{email}/status        { status: "active"|"suspended" }
+
+ENDPOINT PROTECTION
+  As of the auth work, every endpoint above except the ones explicitly marked
+  "public" now requires a valid JWT (Authorization: Bearer header), and most
+  require a specific role or resource ownership (e.g. only the lecturer
+  assigned to a course, or an admin, can manage its sessions; a student can
+  only read their own record). POST /classrooms/{classId}/image is
+  deliberately excluded from JWT auth — camera firmware cannot log in — and
+  currently has no additional check beyond the pre-existing deviceId
+  comparison (a shared-secret header for this endpoint was built and verified
+  once, then reverted pending a decision with the hardware/firmware team; see
+  AUTH_CHANGES.md). Full endpoint-by-endpoint access rules are in
+  AUTH_CHANGES.md's Phase 3 section.
+
+
+================================================================================
+  10. NDPA COMPLIANCE
+================================================================================
+
+The Nigeria Data Protection Act 2023 compliance is built into the system at
+the data layer, not bolted on as an afterthought.
+
+  s.24 — Data minimisation
+    Uploaded registration photos are processed in memory only. They are never
+    written to disk, never stored in the database, and never uploaded to
+    Cloudinary. Only the 128-float embedding vectors extracted from the photos
+    are stored. A face cannot be reconstructed from an embedding vector — the
+    process is mathematically one-way.
+
+  s.31 — Age requirement
+    The registration form requires the student to explicitly confirm they are
+    18 or older, or have parental/guardian consent. This is validated server-
+    side — the backend returns a 422 if ageConsent is not "true".
+
+  s.34 — Rights of a data subject (including access)
+    The student portal (GET /students/lookup/{matricNumber}) returns the
+    student's complete attendance history, consent timestamp, consent version,
+    biometric active status, and consent withdrawal date if applicable. Any
+    student can access all data held about them using only their matric number
+    today; Phase 4 of the auth work changes this to read the matric number
+    from the logged-in student's own token instead, with an explicit matric
+    parameter accepted only for administrators.
+
+    The email address collected by the auth work (see section 8) is personal
+    data under the Act and falls under this same right of access — it should
+    appear alongside the existing consent and attendance fields in any s.34
+    response, and in the registration privacy notice.
+
+  s.34 — Right to erasure, with s.35 — Withdrawal of consent
+    DELETE /courses/{courseCode}/students/biometrics
+    Instantly clears the embeddings array and sets embeddingsDeleted: True.
+    Future face recognition queries filter out this student. The student record
+    and all attendance history are preserved (non-biometric data). The consent
+    withdrawal timestamp is stored for the audit trail.
+
+    This endpoint is exercised as a withdrawal of consent under s.35, which
+    triggers erasure of the data that was processed on that consent basis;
+    erasure itself sits under s.34. (Previously cited here as s.36 — s.36 is
+    the right to object, which is not what this endpoint does. Verify the
+    exact subsection numbering against the gazetted NDPA text before relying
+    on any of these citations in submission material.)
+
+  Manual alternative
+    The system never makes biometric consent compulsory. Every registration
+    page explicitly states that a manual attendance alternative is available
+    and that not consenting carries no academic penalty. The manualAltConsent
+    checkbox confirms the student understood this — and is required for
+    registration to proceed, ensuring the student has genuinely read it.
+
+
+================================================================================
+  11. DEPLOYMENT
+================================================================================
+
+BACKEND
+  Requirements: Python 3.11, all packages in requirements.txt
+  Start command: uvicorn main:app --host 0.0.0.0 --port 8000
+  Environment:  backend/.env file with the following vars:
+    DATABASE_URL          MongoDB Atlas connection string (with TLS)
+    CLOUDINARY_API_KEY    Cloudinary credentials
+    CLOUDINARY_API_SECRET
+    CLOUDINARY_CLOUD_NAME
+
+  On Linux deployment platforms (Render, Railway, Heroku):
+    - dlib compiles from source during pip install using the system gcc/g++
+    - No pre-built wheel needed — compilation is automatic
+    - No numpy version concerns — dlib is compiled against whatever numpy
+      pip installs, so they always match
+
+  Local Windows development:
+    - Python 3.11 required (not 3.14 — dlib has no 3.14 wheel)
+    - dlib installed via pre-built wheel (dlib-19.24.1-cp311-cp311-win_amd64)
+    - NumPy must be < 2.0 (numpy 1.26.4) — the pre-built dlib wheel was
+      compiled against numpy 1.x; numpy 2.x changes the C API and breaks it
+    - See api_test_review.txt for the full explanation and fix
+
+FRONTEND
+  Build:   npm run build → produces dist/ folder
+  Serve:   any static file server or CDN
+  Dev:     npm run dev → Vite dev server on port 8080
+  Env:     frontend/.env (VITE_* variables baked into the build at build time)
+
+CAMERAS / IoT DEVICES
+  Devices must POST to /classrooms/{classId}/image with:
+    - deviceId matching the registered deviceId for that classroom
+    - A valid image file (JPEG or PNG)
+  The firmware/ directory contains the device-side code.
+
+
+================================================================================
+  12. KNOWN LIMITATIONS & NOTES
+================================================================================
+
+- Server-side authentication exists (JWT, role- and ownership-checked on the
+  backend — see section 8/9 and AUTH_CHANGES.md) and is enforced on every
+  endpoint, including registration and the student attendance lookup as of
+  the auth work's final phase. The legacy client-side admin password
+  (VITE_ADMIN_PASSWORD) still works in parallel, deliberately — kept as the
+  developer's own temporary testing fallback until the mailer service (which
+  actually delivers login codes by email) is confirmed working. See
+  AUTH_CHANGES.md's Phase 4 section for the four places this touches and
+  what to remove once it's no longer needed.
+
+- The camera image endpoint (POST /classrooms/{classId}/image) has no secret
+  or credential beyond the pre-existing deviceId comparison, which is
+  discoverable from the public classrooms API. A shared-secret header for
+  this endpoint was built, verified, and then reverted — hardware/firmware is
+  outside the current maintainer's control and needs a decision with whoever
+  owns the ESP32 firmware before this is attempted again.
+
+- face_recognition and dlib are not imported at module level in main.py. The
+  server starts and runs normally without them — only the registration and
+  image capture endpoints will fail at runtime if they are not installed. This
+  allows the backend to run in "occupancy-only" mode on lightweight deployments.
+
+- The student portal (GET /students/lookup/{matricNumber}) returns 404 if the
+  student has no ended sessions yet. Students who are registered but have had
+  no sessions will see a not-found error rather than an empty results page.
+
+- YOLOv8 nano (yolov8n.pt) is the smallest and fastest YOLO variant. It trades
+  some accuracy for speed. For environments with poor lighting or many people,
+  yolov8s.pt (small) or yolov8m.pt (medium) would detect more accurately at
+  the cost of higher inference time.
+
+- The face recognition matching threshold is hardcoded at 0.55. This works
+  well in controlled classroom settings. Environments with varied lighting or
+  students who look similar may benefit from tuning this value.
+
+- Duplicate enrollment returns HTTP 409 Conflict (not 400). This is the correct
+  semantic — 409 means "state conflict with the current resource state."
+
+================================================================================

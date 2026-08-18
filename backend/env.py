@@ -2,10 +2,16 @@ import os
 from dotenv import load_dotenv
 
 
-# DATABASE_URL is required by BOTH backends (they share the same MongoDB).
+# DATABASE_URL and JWT_SECRET are required by BOTH backends (they share the same
+# MongoDB and the same auth module).
 REQUIRED_ENV_VARS = [
     "DATABASE_URL",
+    "JWT_SECRET",
 ]
+
+# Minimum acceptable length for JWT_SECRET — rejects empty/placeholder values.
+# A short or default secret makes every issued token forgeable.
+_MIN_JWT_SECRET_LENGTH = 32
 
 # Cloudinary is only used by the HEAVY backend (main.py) for image uploads.
 # The light backend (main-light.py) on Render never touches Cloudinary, so we
@@ -34,6 +40,14 @@ def validate_env():
         print(f"Missing required environment variables: {', '.join(missing_vars)}")
         exit(1)
 
+    if len(env_vars["JWT_SECRET"]) < _MIN_JWT_SECRET_LENGTH:
+        print(
+            f"JWT_SECRET is too short (must be at least {_MIN_JWT_SECRET_LENGTH} "
+            "characters). Generate a long random value, e.g.: "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+        exit(1)
+
     for var in OPTIONAL_ENV_VARS:
         env_vars[var] = os.getenv(var)
 
@@ -56,5 +70,27 @@ CLOUDINARY_API_SECRET = env_vars.get("CLOUDINARY_API_SECRET")
 CLOUDINARY_CLOUD_NAME = env_vars.get("CLOUDINARY_CLOUD_NAME")
 
 
+# -------------------------------------------------------
+# AUTHENTICATION
+# -------------------------------------------------------
+JWT_SECRET = env_vars["JWT_SECRET"]
+TOKEN_TTL_HOURS = int(os.getenv("TOKEN_TTL_HOURS", "24"))
+ADMIN_TOKEN_TTL_HOURS = int(os.getenv("ADMIN_TOKEN_TTL_HOURS", "8"))
+
+# Comma-separated bootstrap administrator addresses, normalised once at startup.
+ADMIN_EMAILS = [
+    e.strip().lower()
+    for e in os.getenv("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+]
+
+# Shared secret for the camera image endpoint — unused until enforcement (Phase 3),
+# declared now so it's available in every environment from day one.
+DEVICE_SECRET = os.getenv("DEVICE_SECRET", "")
+
+STUDENT_EMAIL_DOMAIN = os.getenv("STUDENT_EMAIL_DOMAIN", "live.unilag.edu.ng")
+STAFF_EMAIL_DOMAIN = os.getenv("STAFF_EMAIL_DOMAIN", "unilag.edu.ng")
+MATRIC_DIGITS = int(os.getenv("MATRIC_DIGITS", "9"))
+LOGIN_CODE_TTL_MINUTES = int(os.getenv("LOGIN_CODE_TTL_MINUTES", "10"))
 
 

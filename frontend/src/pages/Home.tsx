@@ -68,7 +68,7 @@ const stats = [
 
 /* ======================================================================== */
 const Home = () => {
-  const { isAdmin, login, logout } = useAuth();
+  const { user, login, logout } = useAuth();
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -126,7 +126,7 @@ const Home = () => {
               <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
             </Link>
 
-            {isAdmin ? (
+            {user ? (
               <button
                 type="button"
                 onClick={logout}
@@ -136,47 +136,57 @@ const Home = () => {
                 Sign Out
               </button>
             ) : (
-              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
-                  >
-                    <LogIn className="h-4 w-4" />
-                    Admin Login
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-sm bg-card">
-                  <DialogHeader>
-                    <DialogTitle className="font-serif text-2xl font-normal">Admin Login</DialogTitle>
-                    <DialogDescription className="text-muted-foreground text-sm">
-                      Enter the admin password to manage classrooms.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleLogin} className="space-y-5 pt-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="password" className="text-xs tracking-widest uppercase text-muted-foreground">
-                        Password
-                      </Label>
-                      <Input
-                        id="password"
-                        type="password"
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
-                        className="bg-background border-border"
-                      />
-                      {loginError && <p className="text-xs text-destructive">{loginError}</p>}
-                    </div>
+              <>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Log In
+                </Link>
+                {/* Developer's own temporary testing fallback — see AuthContext.tsx */}
+                <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                  <DialogTrigger asChild>
                     <button
-                      type="submit"
-                      className="w-full bg-foreground text-background text-sm tracking-widest uppercase py-3 rounded-full hover:bg-foreground/90 transition-colors"
+                      type="button"
+                      className="inline-flex items-center gap-2 text-sm tracking-widest uppercase text-muted-foreground border border-border px-8 py-3.5 rounded-full hover:border-foreground hover:text-foreground transition-colors duration-200"
                     >
-                      Enter
+                      <LogIn className="h-4 w-4" />
+                      Admin Login
                     </button>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-sm bg-card">
+                    <DialogHeader>
+                      <DialogTitle className="font-serif text-2xl font-normal">Admin Login</DialogTitle>
+                      <DialogDescription className="text-muted-foreground text-sm">
+                        Enter the admin password to manage classrooms.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleLogin} className="space-y-5 pt-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="password" className="text-xs tracking-widest uppercase text-muted-foreground">
+                          Password
+                        </Label>
+                        <Input
+                          id="password"
+                          type="password"
+                          placeholder="••••••••"
+                          value={password}
+                          onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
+                          className="bg-background border-border"
+                        />
+                        {loginError && <p className="text-xs text-destructive">{loginError}</p>}
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full bg-foreground text-background text-sm tracking-widest uppercase py-3 rounded-full hover:bg-foreground/90 transition-colors"
+                      >
+                        Enter
+                      </button>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </>
             )}
           </div>
         </div>
