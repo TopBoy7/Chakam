@@ -93,7 +93,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import type { Course } from "@/types/attendance";
 
 const MAX_PHOTOS = 5;
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
 const StudentRegistration = () => {
   const { token } = useParams<{ token: string }>();
@@ -118,14 +117,8 @@ const StudentRegistration = () => {
     if (!token) return;
     const fetchCourse = async () => {
       try {
-        const res = await fetch(`${API_BASE}/register/${token}`);
-        if (!res.ok) {
-          const d = await res.json();
-          throw new Error(d?.detail || "Invalid or expired registration link");
-        }
-        const data = await res.json();
-        const raw = data.data.course;
-        setCourse({ ...raw, id: raw.courseCode, studentCount: 0 });
+        const raw = await api.attendance.students.resolveRegistrationToken(token);
+        setCourse({ ...raw, id: raw.courseCode, studentCount: 0 } as Course);
       } catch (err) {
         setCourseError(err instanceof Error ? err.message : "Failed to load registration info");
       } finally {

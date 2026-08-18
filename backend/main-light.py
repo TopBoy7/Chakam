@@ -494,7 +494,7 @@ async def create_course(
         if not lecturer:
             raise HTTPException(404, "lecturer not found")
 
-    course = models.Course(**req.model_dump(), registrationToken=str(uuid.uuid4()))
+    course = models.Course(**req.model_dump(), registrationToken=await database.generate_unique_registration_code())
     inserted_id = await database.add_course(course)
 
     return {

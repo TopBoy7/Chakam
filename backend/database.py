@@ -3,6 +3,7 @@ from bson import ObjectId
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Union, List, Dict, Optional
+import secrets
 
 import env, models
 
@@ -480,6 +481,23 @@ async def get_course_by_token(token: str) -> Union[models.Course, None]:
     except Exception as e:
         print(e)
         throw_mongo_error()
+
+
+# Excludes 0/O and 1/I/l — easy to misread when copied by hand or read aloud.
+_REGISTRATION_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+async def generate_unique_registration_code(length: int = 7) -> str:
+    """Short, human-friendly alternative to a UUID for course registration
+    links — easier to read aloud, retype, or fit on one line than a full
+    UUID. Checked for uniqueness against existing courses; collisions are
+    astronomically unlikely at this alphabet/length but courses are created
+    rarely enough that the check costs nothing."""
+    for _ in range(10):
+        code = "".join(secrets.choice(_REGISTRATION_CODE_ALPHABET) for _ in range(length))
+        if not await get_course_by_token(code):
+            return code
+    raise RuntimeError("could not generate a unique registration code")
 
 
 # -------------------------------------------------------

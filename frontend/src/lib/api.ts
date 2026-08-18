@@ -349,6 +349,11 @@ export const api = {
         }));
       },
 
+      resolveRegistrationToken: async (token: string): Promise<Record<string, unknown>> => {
+        const res = await throwOnError(await apiFetch(`${API_BASE}/register/${token}`));
+        return (await res.json()).data.course;
+      },
+
       deleteBiometrics: async (courseCode: string, matricNumber: string): Promise<void> => {
         await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/students/biometrics`, {
           method: 'DELETE',

@@ -653,7 +653,7 @@ async def create_course(
 
     course = models.Course(
         **req.model_dump(),
-        registrationToken=str(uuid.uuid4()),
+        registrationToken=await database.generate_unique_registration_code(),
     )
     inserted_id = await database.add_course(course)
 
