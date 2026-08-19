@@ -3,7 +3,7 @@
   TECHNICAL OVERVIEW & ARCHITECTURE DOCUMENT
 ================================================================================
 
-  Last updated: 2026-04-26
+  Last updated: 2026-08-19
 
 
 ================================================================================
@@ -26,10 +26,13 @@ If there is an active attendance session for that classroom, face recognition
 runs next on the same frame to identify and mark students.
 
 The system also provides:
-  - A student self-registration portal where students upload their own photos
-    and give biometric consent before being enrolled in a course.
-  - A student-facing attendance portal where any student can look up their own
-    attendance record using only their matric number.
+  - Real, server-verified login for every role (student, lecturer, admin) via
+    UNILAG email + one-time code — no passwords anywhere.
+  - A student self-registration portal (behind login) where students upload
+    their own photos and give biometric consent before being enrolled in a
+    course they were sent a link to.
+  - A student-facing attendance portal (behind login) where a student sees
+    only their own attendance record — never anyone else's.
   - Consent management built to comply with Nigeria's Data Protection Act (NDPA)
     2023, including the right to erasure (deleting face data) and the right of
     access (viewing all stored data and consent records).
@@ -58,10 +61,12 @@ FRONTEND
   Build tool:       Vite 5
   UI components:    ShadCN UI (Radix UI primitives + Tailwind CSS)
   Routing:          React Router v6
-  Charts:           Recharts
-  HTTP:             Native fetch API (no Axios)
-  Auth:             JWT bearer token (localStorage), plus a legacy admin
-                    password path kept working in parallel — see section 8.
+  HTTP:             Native fetch API (no Axios) — every call goes through a
+                    single centralized client (src/lib/api.ts); no component
+                    calls fetch directly
+  Auth:             JWT bearer token (localStorage). Email + one-time code
+                    login for every role, including admin — no password path
+                    exists anywhere in the app.
   Real-time:        WebSocket with exponential backoff reconnection,
                     authenticated with a first-message token handshake
 
@@ -75,30 +80,39 @@ DATABASE
     - students
     - enrollments
     - sessions
-    - users          (added for authentication — see section 4)
-    - login_codes     (added for authentication — see section 4)
+    - users          (authentication — see section 5)
+    - login_codes    (authentication — see section 5)
 
 DEPLOYMENT TOPOLOGY — TWO BACKEND PROCESSES
-  Chakam actually runs as two independent FastAPI processes sharing one
-  MongoDB database and one set of support modules (models.py, database.py,
-  env.py, send_email.py, auth.py):
+  Chakam runs as two independent FastAPI processes sharing one MongoDB
+  database and one set of support modules (models.py, database.py, env.py,
+  send_email.py, auth.py):
     - backend/main.py        "Heavy" backend. Runs YOLO + face_recognition.
-                              Reachable directly by camera firmware.
-    - backend/main-light.py  "Light" backend. Proxies the image-upload and
-                              face-registration endpoints to the heavy
-                              backend over HTTP, and independently
-                              re-implements every other route itself (talking
-                              to the same MongoDB directly, not through the
-                              heavy backend).
+                              Reachable directly by camera firmware. Deployed
+                              separately from everything else below (its own
+                              host — currently needs a manual redeploy step,
+                              it is not on the same auto-deploy pipeline as
+                              the light backend or frontend).
+    - backend/main-light.py  "Light" backend. Deployed on Render. Proxies the
+                              image-upload and face-registration endpoints to
+                              the heavy backend over HTTP (forwarding the
+                              caller's Authorization header so the heavy
+                              backend's own role checks still apply), and
+                              independently re-implements every other route
+                              itself (talking to the same MongoDB directly).
   Both processes register the same route surface and the same auth
   dependencies — a request behaves identically regardless of which one
-  handles it, except for the three heavy-only endpoints the light backend
-  forwards.
+  handles it, except for the endpoints the light backend forwards.
 
-  A third, separate app lives in mailer/ — a small Next.js service that
-  sends email via Gmail/nodemailer. The backend does not send SMTP directly;
-  it POSTs to the mailer's /api/send over HTTPS (MAILER_URL, MAILER_SECRET).
-  This is what both capacity-alert emails and login codes go through.
+  The frontend is deployed on Vercel and talks to the light backend
+  (VITE_API_BASE_URL / VITE_WS_URL).
+
+  A third, separate app lives in mailer/ — a small Next.js service
+  (deployed on Vercel as chakam-mailer) that sends email via Gmail/
+  nodemailer. The backend does not send SMTP directly; it POSTs to the
+  mailer's /api/send over HTTPS (MAILER_URL, MAILER_SECRET). Both capacity-
+  alert emails and login codes go through this. Confirmed working in
+  production.
 
 
 ================================================================================
@@ -134,22 +148,34 @@ DEPLOYMENT TOPOLOGY — TWO BACKEND PROCESSES
   ├── frontend/
   │   ├── src/
   │   │   ├── pages/
-  │   │   │   ├── Home.tsx              Landing page + legacy admin login
-  │   │   │   ├── Login.tsx             Email + one-time-code login
+  │   │   │   ├── Home.tsx              Landing page
+  │   │   │   ├── Login.tsx             Email + one-time-code login (only
+  │   │   │   │                        login path — every role uses this)
   │   │   │   ├── PendingApproval.tsx   Holding screen for unassigned staff
   │   │   │   ├── AdminUsers.tsx        Approve/assign roles, suspend accounts
   │   │   │   ├── Dashboard.tsx         Classroom overview + live monitoring
-  │   │   │   ├── Attendance.tsx        Course management + session hub
+  │   │   │   ├── Attendance.tsx        Course list + create/delete
   │   │   │   ├── ClassroomDetail.tsx   Per-classroom details + sessions
-  │   │   │   ├── CourseDetail.tsx      Course details + enrollments
-  │   │   │   ├── StudentRegistration.tsx  Public student face registration
-  │   │   │   ├── StudentPortal.tsx     Public attendance self-lookup
+  │   │   │   ├── CourseDetail.tsx      Course detail, sessions, attendance,
+  │   │   │   │                        enrollment, Edit Course (lecturer
+  │   │   │   │                        assignment)
+  │   │   │   ├── StudentRegistration.tsx  Student face registration
+  │   │   │   │                        (requires student login)
+  │   │   │   ├── StudentPortal.tsx     Student attendance self-lookup
+  │   │   │   │                        (requires student login)
   │   │   │   ├── StudentsPage.tsx      Admin student management
   │   │   │   ├── LecturersPage.tsx     Admin lecturer management
-  │   │   │   ├── Analytics.tsx         Attendance charts + export
+  │   │   │   ├── Analytics.tsx         Occupancy charts — built, but NOT
+  │   │   │   │                        wired into App.tsx. Considered
+  │   │   │   │                        redundant with the Dashboard's live
+  │   │   │   │                        occupancy view and deliberately left
+  │   │   │   │                        unrouted. Dead code pending a decision
+  │   │   │   │                        to delete it outright.
   │   │   │   └── NotFound.tsx
   │   │   ├── components/
-  │   │   │   ├── Navigation.tsx
+  │   │   │   ├── Navigation.tsx        Role-aware nav links (only shows
+  │   │   │   │                        links the current role can actually
+  │   │   │   │                        use — see section 5)
   │   │   │   ├── ClassroomCard.tsx
   │   │   │   ├── CreateClassroomDialog.tsx
   │   │   │   ├── EditClassroomDialog.tsx
@@ -164,7 +190,8 @@ DEPLOYMENT TOPOLOGY — TWO BACKEND PROCESSES
   │   │   │   └── use-toast.ts
   │   │   ├── lib/
   │   │   │   ├── api.ts            Centralized API client (auth-aware fetch)
-  │   │   │   ├── exportAttendance.ts  CSV/JSON/PDF/DOCX export
+  │   │   │   ├── exportAttendance.ts  CSV/JSON/PDF/DOCX export, generated
+  │   │   │   │                    client-side, no backend round-trip
   │   │   │   └── utils.ts
   │   │   └── types/
   │   │       ├── attendance.ts     Course, Session, Attendance types
@@ -197,7 +224,7 @@ CLASSROOM
   created_at     datetime
   updated_at     datetime
 
-LECTURER
+LECTURER  (a profile record — separate from a login account, see section 5)
   staffId        string   Unique staff identifier
   fullName       string
   email          string
@@ -206,8 +233,18 @@ LECTURER
 COURSE
   courseCode         string   Unique code (e.g. "CSC101")
   courseName         string
-  lecturerId         string   Optional reference to a Lecturer
-  registrationToken  string   UUID generated on creation (for self-registration link)
+  lecturerId         string   Optional — staffId of the owning Lecturer. A
+                              lecturer creating their own course is auto-
+                              assigned here (the request body cannot override
+                              this); only an admin can (re)assign it
+                              afterward via the Edit Course dialog.
+  registrationToken  string   Short human-friendly code generated on
+                              creation (7 characters, from an alphabet with
+                              ambiguous characters like 0/O/1/I removed —
+                              e.g. "K7XQPRT"), used in the self-registration
+                              link https://{frontend}/register/{token}.
+                              Courses created before this change still carry
+                              their old long UUID token unless regenerated.
   createdAt          datetime
 
 STUDENT
@@ -228,7 +265,7 @@ ENROLLMENT
   matricNumber   string   Reference to Student
   enrolledAt     datetime
 
-USER  (collection: users — authentication)
+USER  (collection: users — login accounts, distinct from STUDENT/LECTURER above)
   email              string   Normalised (lowercased, trimmed), unique index
   role               string   "student" | "lecturer" | "admin" | "pending"
   status             string   "active" | "suspended"
@@ -273,7 +310,131 @@ ATTENDANCE ENTRY (embedded in Session.attendees)
 
 
 ================================================================================
-  5. THE OCCUPANCY SYSTEM (YOLO)
+  5. ROLES & PERMISSIONS
+================================================================================
+
+Four roles exist: pending, student, lecturer, admin. A user's role lives on
+their USER document in MongoDB and is re-read from the database on every
+single request (auth.py's get_current_user dependency) — it is never trusted
+from the JWT claim. This means a role change, suspension, or promotion by an
+admin takes effect on the user's very next request, not after their token
+expires.
+
+HOW A ROLE IS ASSIGNED
+  On first login, the backend classifies the email address and assigns a
+  role automatically, in this order:
+    1. Email is in ADMIN_EMAILS (env var)              → role = admin
+    2. Email matches an existing Lecturer document      → role = lecturer,
+                                                           staffId auto-linked
+    3. Email matches the student pattern (matric-based
+       local part, e.g. 190403014@live.unilag.edu.ng)  → role = student,
+                                                           matricNumber
+                                                           derived from the
+                                                           local part
+    4. Email matches the general staff pattern          → role = pending
+       (any other @*.unilag.edu.ng address)
+    5. Anything else                                    → rejected, 403
+       "must be a UNILAG address"
+  A "pending" account has verified their email but has no working role yet
+  — they land on /pending-approval and cannot use any protected feature
+  until an admin assigns them a role via PUT /admin/users/{email}/role.
+
+PENDING
+  Frontend access:  /pending-approval only. ProtectedRoute redirects a
+                    pending user to this page from anywhere else.
+  Backend access:   Can call GET /auth/me, PATCH /auth/me, POST /auth/logout.
+                    Everything else requiring a specific role or "any active
+                    role" rejects a pending user.
+
+STUDENT
+  Can view:
+    - Dashboard, classroom list/detail, course list ("any active role"
+      endpoints — GET /classrooms, GET /courses, GET /courses/{code})
+    - Their own registration link's course info (GET /register/{token})
+    - Their own full attendance record and consent history (GET
+      /students/lookup/{matricNumber} — self only; require_self_or_admin
+      rejects any matric number that isn't their own)
+  Can do:
+    - Register their own face for a course they were sent a link to (POST
+      /courses/{code}/register) — matricNumber/fullName always come from
+      their own JWT, never from the request body, so one student can never
+      register as another
+    - Delete their own biometric data (DELETE
+      /courses/{code}/students/biometrics) — NDPA s.34/s.35/s.36 right of
+      erasure
+  Cannot:
+    - View another student's data, another course's enrolled-student list,
+      or another course's sessions (assert_course_access requires course
+      ownership or admin; a student is neither)
+    - Create, edit, or delete classrooms, lecturers, or courses
+    - Start/end sessions, capture attendance, or override attendance for
+      anyone
+    - Reach /attendance/course/:courseId (frontend-restricted to
+      lecturer/admin — a student has no legitimate use for it and every
+      sub-request the page makes would 403 anyway), /lecturers, /students,
+      or /admin/users
+
+LECTURER
+  Can view: everything a student can view via "any active role" endpoints,
+  plus (for courses they own) the course's enrolled-student list and
+  session history.
+  Can do:
+    - Create a course (POST /courses) — automatically assigned as its
+      lecturerId; cannot be overridden by anything in the request
+    - For a course where course.lecturerId == their own staffId ("course
+      owner or admin", enforced by auth.assert_course_access on the
+      backend and mirrored by the frontend's canManage check):
+        - Start and end sessions
+        - Trigger attendance capture, mark all present
+        - Manually toggle a student present/absent, overriding face
+          recognition for that student for the rest of the session
+        - Enroll/unenroll students
+        - View and copy the course's registration link
+    - Copy the registration link for ANY course from the /attendance list
+      page — copying is a client-side action (no API call), so it isn't
+      restricted to owned courses; only the management actions above are.
+  Cannot:
+    - Manage a course they do not own (403 from the backend even if they
+      guess the URL directly — the frontend gate is a convenience, not the
+      real enforcement)
+    - Rename a course or reassign its lecturer (PUT /courses/{code} is
+      admin-only, even for the lecturer's own course)
+    - Delete any course, classroom, or lecturer
+    - Reach /lecturers, /students, /admin/users, or /my-attendance
+      (student-only)
+
+ADMIN
+  Full access to every endpoint and every page. Specifically, beyond what
+  a lecturer can do:
+    - Create/edit/delete classrooms and lecturer profiles
+    - Rename any course and (re)assign its lecturer via the Edit Course
+      dialog on the course detail page — the lecturer picker there only
+      renders once at least one Lecturer profile exists (added via the
+      Lecturers page); if none exist yet it shows a message pointing to
+      that page instead of silently disappearing
+    - Manage sessions/enrollment/attendance for ANY course, regardless of
+      lecturerId (assert_course_access always passes for role == "admin")
+    - Delete any course
+    - Look up any student's attendance record by any matric number
+      (require_self_or_admin passes any matric for an admin)
+    - Approve pending accounts and assign roles/staffId (PUT
+      /admin/users/{email}/role), suspend/reactivate accounts (PUT
+      /admin/users/{email}/status)
+    - Cannot demote their own account away from admin — a safety check in
+      assign_role rejects it, so an admin can never accidentally lock
+      themselves out
+
+CAMERA / FIRMWARE (not a user role)
+  POST /classrooms/{classId}/image carries no JWT at all — camera firmware
+  cannot log in. Its only check is that the request's deviceId field
+  matches the classroom's registered deviceId, which is readable from the
+  public classrooms list. A shared-secret header for this endpoint was
+  built and verified once, then reverted pending a decision with whoever
+  owns the ESP32 firmware — see AUTH_CHANGES.md.
+
+
+================================================================================
+  6. THE OCCUPANCY SYSTEM (YOLO)
 ================================================================================
 
 PURPOSE
@@ -303,16 +464,23 @@ HOW IT WORKS
     does not block the FastAPI event loop during the CPU-heavy inference.
 
     Call parameters:
-      model.predict(img, imgsz=1920, conf=0.25, iou=0.45, augment=True)
+      model.predict(img, imgsz=1920, conf=0.5, iou=0.45)
 
     - imgsz=1920: processes the image at up to 1920px — higher accuracy for
       distant or small people
-    - conf=0.25: detection confidence threshold — boxes below 25% confidence
-      are discarded
+    - conf=0.5: detection confidence threshold — boxes below 50% confidence
+      are discarded. Raised from an earlier 0.25 after live testing showed a
+      single person in frame being counted as 2-4 — the nano model at 0.25
+      was counting low-confidence partial detections (limbs, patterned
+      background fabric) as extra people. augment=True (test-time
+      augmentation, which merges predictions across flipped/scaled passes)
+      was removed at the same time — it was compounding the problem by
+      letting one person generate several overlapping low-confidence boxes
+      that NMS didn't fully collapse. Not yet re-validated against a live
+      camera feed beyond that initial fix — if 0.5 still over- or under-
+      counts in practice, it may need further tuning.
     - iou=0.45: IoU threshold for non-maximum suppression — removes duplicate
       boxes for the same person
-    - augment=True: test-time augmentation — runs inference on flipped/scaled
-      versions of the image and merges results for better accuracy
 
   Step 4 — Person counting
     YOLO returns bounding boxes, each with a class index. Class 0 in the COCO
@@ -361,7 +529,7 @@ PERFORMANCE
 
 
 ================================================================================
-  6. THE ATTENDANCE TRACKING SYSTEM (FACE RECOGNITION)
+  7. THE ATTENDANCE TRACKING SYSTEM (FACE RECOGNITION)
 ================================================================================
 
 PURPOSE
@@ -371,18 +539,25 @@ PURPOSE
 HOW IT WORKS — STUDENT REGISTRATION
 
   Before face recognition can identify a student, the student must register
-  and upload their face photos. This happens through a public self-registration
-  page linked to a specific course.
+  and upload their face photos. This requires the student to be logged in —
+  the link alone is not enough.
 
-  Step 1 — Lecturer creates a course
-    When a course is created, the backend automatically generates a UUID
-    registrationToken and stores it. The lecturer copies the registration link:
+  Step 1 — Lecturer or admin creates a course
+    When a course is created, the backend automatically generates a short
+    registrationToken (see section 4) and stores it. The lecturer (or admin)
+    copies the registration link from the course list or course detail page:
       https://{frontend}/register/{token}
 
-  Step 2 — Student visits the registration page
-    The frontend resolves the token:
-      GET /register/{token}
-    and retrieves the course name to display on the page.
+  Step 2 — Student opens the link
+    If not logged in, ProtectedRoute sends them to
+    /login?redirect=/register/{token} first. They request a one-time code
+    with their UNILAG email (POST /auth/request-code — works even if no
+    account exists yet), enter the 6-digit code (POST /auth/verify-code —
+    creates the account on first success if it didn't already exist), and
+    if it's a brand-new account, are asked for their full name once. They
+    then land back on the original registration link automatically.
+    The frontend resolves the token (GET /register/{token}, requires
+    student login) and retrieves the course name to display.
 
   Step 3 — Consent
     The student is presented with three mandatory consent checkboxes:
@@ -400,7 +575,9 @@ HOW IT WORKS — STUDENT REGISTRATION
     drag-and-drop and shows previews of all uploaded images.
 
   Step 5 — Embedding extraction (backend)
-    POST /courses/{courseCode}/register (multipart form)
+    POST /courses/{courseCode}/register (multipart form, requires student
+    login — matricNumber and fullName come from the caller's own JWT, never
+    from the request, so a student can only ever register their own face)
 
     For each photo:
       a. The image bytes are loaded using face_recognition.load_image_file()
@@ -431,7 +608,7 @@ HOW IT WORKS — STUDENT REGISTRATION
 
 HOW IT WORKS — SESSION AND ATTENDANCE
 
-  Step 1 — Lecturer starts a session
+  Step 1 — Lecturer (course owner) or admin starts a session
     POST /sessions
     Body: { courseCode, classId }
 
@@ -497,29 +674,32 @@ HOW IT WORKS — SESSION AND ATTENDANCE
     the updated session state and the list of newly marked matric numbers. The
     lecturer's browser updates the attendance list in real-time.
 
-  Step 8 — Manual override
+  Step 8 — Manual override (course owner or admin only)
     PUT /sessions/{sessionId}/attendance/{matricNumber}
     Body: { status: "present" | "absent" }
 
-    A lecturer can manually set any student as present or absent at any time
-    during or after a session:
+    The lecturer who owns the course (or an admin) can manually set any
+    student as present or absent at any time during or after a session:
       - Sets manuallyOverridden: True on the attendance entry
       - If status is "present": upserts the entry with method="manual"
       - If status is "absent": removes the entry from the attendees array
         (absent is represented by absence, not a flag)
       - Once manually overridden, face recognition will never modify that
         student's record for the rest of the session
+    A student sees the same status as a read-only indicator — they cannot
+    trigger this action.
 
-  Step 9 — End session
+  Step 9 — End session (course owner or admin only)
     POST /sessions/{sessionId}/end
 
     Sets status: "ended" and endedAt: now. Once ended, face recognition on
     subsequent images will no longer mark attendance for this session. The
     attendance record is frozen.
 
-CONSENT WITHDRAWAL (NDPA s.36 — Right to Erasure)
+CONSENT WITHDRAWAL (NDPA s.35/s.36 — Withdrawal of consent / Right to Erasure)
   DELETE /courses/{courseCode}/students/biometrics
   Body: { matricNumber }
+  Requires login: the student themself, or an admin.
 
   Execution:
     - Sets embeddings: [] (clears all stored vectors)
@@ -532,7 +712,7 @@ CONSENT WITHDRAWAL (NDPA s.36 — Right to Erasure)
 
 
 ================================================================================
-  7. HOW OCCUPANCY AND ATTENDANCE ARE CONNECTED
+  8. HOW OCCUPANCY AND ATTENDANCE ARE CONNECTED
 ================================================================================
 
 They share one endpoint, one physical device, and one classroom.
@@ -567,22 +747,26 @@ They share one endpoint, one physical device, and one classroom.
   Practical classroom flow:
     1. Camera continuously sends images (e.g. every 10-30 seconds)
     2. Dashboard always shows live headcount (occupancy from YOLO)
-    3. Before class: lecturer starts a session via the Attendance page
+    3. Before class: lecturer (course owner) or admin starts a session via
+       the course detail page
     4. During class: same camera images now also trigger face recognition
     5. Students are marked present automatically as they are detected
-    6. Lecturer can monitor the attendance list updating in real-time
+    6. Lecturer can monitor the attendance list updating in real-time, and
+       trigger a manual "Take Attendance" / "Mark All Present" capture
     7. After class: lecturer ends the session
     8. Occupancy continues updating; attendance is now frozen
 
 
 ================================================================================
-  8. FRONTEND ARCHITECTURE
+  9. FRONTEND ARCHITECTURE
 ================================================================================
 
 API CLIENT (src/lib/api.ts)
   All HTTP calls go through a single centralized api object. No component
   calls fetch directly. This means the base URL, error handling, and data
-  transformation are defined in one place.
+  transformation are defined in one place. (This was violated once — a raw
+  fetch() in StudentRegistration.tsx that never attached the auth header,
+  found and fixed.)
 
   Error handling (throwOnError):
     FastAPI returns validation errors as an array of objects under "detail".
@@ -593,26 +777,43 @@ API CLIENT (src/lib/api.ts)
   Transform functions:
     Raw MongoDB documents use snake_case or unusual field names. Transform
     functions (transformCourse, transformSession, etc.) normalize them into
-    typed TypeScript interfaces that the frontend works with.
+    typed TypeScript interfaces that the frontend works with. transformCourse
+    includes lecturerId, which the frontend uses to compute course ownership
+    (see canManage below).
 
 AUTH CONTEXT (src/contexts/AuthContext.tsx)
   Real server-side authentication (all four phases of auth_design.txt — see
-  AUTH_CHANGES.md for the full change log). A student or staff member logs in
-  with their UNILAG email and a one-time code sent by mail
+  AUTH_CHANGES.md for the full change log). Every role, including admin, logs
+  in with their UNILAG email and a one-time code sent by mail
   (POST /auth/request-code, POST /auth/verify-code); the backend issues a
   JWT, stored in localStorage and sent as an Authorization: Bearer header on
   every request. AuthContext exposes { token, user, loading, isAdmin,
-  loginWithToken, logout, refreshUser }. The user object is never trusted from
-  a cache — it is re-fetched from GET /auth/me on every mount.
+  loginWithToken, logout, refreshUser }. isAdmin is simply
+  user?.role === "admin". The user object is never trusted from a cache — it
+  is re-fetched from GET /auth/me on every mount.
 
-  The legacy VITE_ADMIN_PASSWORD path has been fully removed — admin access
-  is now only ever granted through the same email/code login as every other
-  role, via ADMIN_EMAILS. isAdmin is simply user?.role === "admin".
+  There is no password login path anywhere in the app. The old
+  VITE_ADMIN_PASSWORD fallback has been fully removed from AuthContext,
+  ProtectedRoute, and Home.tsx.
 
   Role is never trusted from the JWT claim on the backend — auth.py's
   get_current_user dependency re-reads the role from MongoDB on every
   request, so a promotion, suspension, or role change by an admin takes
   effect immediately rather than waiting for the token to expire.
+
+COURSE OWNERSHIP ("canManage") — src/pages/CourseDetail.tsx
+  The backend's real permission rule for managing a course is "course owner
+  (lecturer whose staffId matches course.lecturerId) or admin" — never just
+  "any lecturer". The frontend mirrors this:
+    isCourseOwner = user?.role === "lecturer" && !!user.staffId
+                    && course?.lecturerId === user.staffId
+    canManage = isAdmin || isCourseOwner
+  canManage gates: Start Class, End Class, Take Attendance / capture, Mark
+  All Present, the manual present/absent toggle (non-managers see the same
+  status as a read-only icon instead of a clickable button), and
+  Enroll/Unenroll Student. "Edit Course" (rename / reassign lecturer) stays
+  admin-only, matching PUT /courses/{code} being admin-only even for the
+  course's own lecturer.
 
 WEBSOCKET HOOK (src/hooks/useClassroomWebSocket.ts)
   Manages the WebSocket connection lifecycle:
@@ -630,150 +831,184 @@ WEBSOCKET HOOK (src/hooks/useClassroomWebSocket.ts)
 
 ROUTING (src/App.tsx)
   Public routes (no auth required):
-    /                     Home page + legacy admin-password login (see
-                          KNOWN LIMITATIONS below — kept as a temporary
-                          developer testing fallback, not yet removed)
-    /login                Real email + one-time-code login
+    /                     Home page
+    /login                Email + one-time-code login (the only login path)
 
   Requires being logged in as any active (non-pending) role — redirects to
   /login?redirect=<path> if logged out (returning here after verifying), or
   to /pending-approval if the account has no role assigned yet:
-    /dashboard             Classroom overview (was public before the auth
-                           work — GET /classrooms now requires login)
+    /dashboard             Classroom overview
     /classroom/:classId    Classroom detail
-    /attendance            Course + session management
-    /attendance/course/:courseId   Course detail
+    /attendance            Course list — "Create Course" shown to lecturer
+                           and admin; "Delete" shown to admin only
 
-  Requires being logged in as a student specifically
-  (ProtectedRoute allowedRoles={["student"]}) — same redirect-and-return
-  behaviour. Both were public/unauthenticated before the auth work's final
-  phase; a student can now only ever register or view their own record,
-  never anyone else's, since the matric number comes from the token instead
-  of a typed-in value or URL parameter:
+  Lecturer + admin only (ProtectedRoute allowedRoles={["lecturer","admin"]}):
+    /attendance/course/:courseId   Course detail, sessions, attendance,
+                                   enrollment. Narrowed from including
+                                   "student" because a student has no
+                                   legitimate use for this page and every
+                                   sub-request it makes (students list,
+                                   sessions list) is course-owner-or-admin
+                                   gated and would 403 for them anyway —
+                                   they now get a clean redirect to
+                                   /dashboard instead of a broken error page.
+
+  Student only (ProtectedRoute allowedRoles={["student"]}) — same
+  redirect-and-return behaviour. A student can only ever register or view
+  their own record, never anyone else's, since the matric number comes from
+  the token instead of a typed-in value or URL parameter:
     /register/:token       Student self-registration
     /my-attendance         Student portal — shows the logged-in student's
-                           own record automatically, no matric entry
+                           own record automatically, no matric entry.
+                           Not shown in the nav to lecturers/admins (it used
+                           to be, which just redirected them away when
+                           clicked).
 
   Admin-only (ProtectedRoute allowedRoles={["admin"]}):
     /lecturers             Lecturer management
     /students              Student management
     /admin/users           Approve pending accounts, assign roles
 
-  /pending-approval        Holding screen for a verified staff account with
-                           no role assigned yet.
+  /pending-approval        Holding screen for a verified account with no
+                           role assigned yet.
 
-  NOTE ON PATHS: this section previously listed /classrooms/:classId (plural)
-  and /courses/:courseCode as the classroom/course detail routes. Those were
-  wrong — the app has always used /classroom/:classId (singular) and
-  /attendance/course/:courseId. Corrected above.
+  NOT routed: /analytics — Analytics.tsx exists in the codebase but has no
+  <Route> entry. Considered redundant with the Dashboard's live occupancy
+  view; left unrouted rather than wired up.
 
 ENVIRONMENT VARIABLES (frontend/.env)
   VITE_API_BASE_URL     Backend HTTP base URL
   VITE_WS_URL           Backend WebSocket base URL
+  Both are baked into the JS bundle at build time — changing them requires
+  a rebuild + redeploy, not just an env var change.
 
 
 ================================================================================
-  9. API ENDPOINT REFERENCE
+  10. API ENDPOINT REFERENCE
 ================================================================================
+
+Permission key: [any] = any active (non-pending) role · [student] ·
+[lecturer+admin] = the lecturer who owns the resource, or admin · [admin]
 
 CLASSROOMS
-  GET    /classrooms                        List all classrooms
-  POST   /classrooms                        Create classroom
-  GET    /classrooms/{classId}              Get single classroom
-  PUT    /classrooms/{classId}              Update classroom
-  DELETE /classrooms/{classId}              Delete classroom
-  POST   /classrooms/{classId}/image        YOLO occupancy + face recognition
+  GET    /classrooms                        [any]    List all classrooms
+  POST   /classrooms                        [admin]  Create classroom
+  GET    /classrooms/{classId}              [any]    Get single classroom
+  PUT    /classrooms/{classId}              [admin]  Update classroom
+  DELETE /classrooms/{classId}              [admin]  Delete classroom
+  POST   /classrooms/{classId}/image        [device] YOLO occupancy + face
+                                                      recognition — no JWT,
+                                                      deviceId check only
 
 LECTURERS
-  GET    /lecturers                         List all lecturers
-  POST   /lecturers                         Create lecturer
-  GET    /lecturers/{staffId}               Get single lecturer
-  DELETE /lecturers/{staffId}               Delete lecturer
+  GET    /lecturers                         [admin]  List all lecturers
+  POST   /lecturers                         [admin]  Create lecturer profile
+  GET    /lecturers/{staffId}               [admin]  Get single lecturer
+  DELETE /lecturers/{staffId}               [admin]  Delete lecturer
 
 COURSES
-  GET    /courses                           List all courses
-  POST   /courses                           Create course (generates token)
-  GET    /courses/{courseCode}              Get single course
-  PUT    /courses/{courseCode}              Update course
-  DELETE /courses/{courseCode}              Delete course
+  GET    /courses                           [any]           List all courses
+  POST   /courses                           [lecturer+admin] Create course —
+                                                      a lecturer caller is
+                                                      auto-assigned as
+                                                      lecturerId; an admin
+                                                      may optionally set any
+                                                      existing lecturer
+  GET    /courses/{courseCode}              [any]           Get single course
+  PUT    /courses/{courseCode}              [admin]         Rename / reassign
+                                                      lecturer — admin only,
+                                                      even for the course's
+                                                      own lecturer
+  DELETE /courses/{courseCode}              [admin]         Delete course
 
 ENROLLMENTS
-  GET    /courses/{courseCode}/enrollments              List enrolled students
-  POST   /courses/{courseCode}/enrollments              Enroll a student
-  DELETE /courses/{courseCode}/enrollments/{matric}     Unenroll a student
+  GET    /courses/{courseCode}/enrollments              [lecturer+admin]
+  POST   /courses/{courseCode}/enrollments              [lecturer+admin]
+  DELETE /courses/{courseCode}/enrollments/{matric}     [lecturer+admin]
 
 STUDENTS (admin)
-  GET    /students                          List all students
-  GET    /students/{matricNumber}           Get single student
-  DELETE /students/{matricNumber}/embeddings  Delete global embeddings
-  GET    /students/{matricNumber}/enrollments  List student's course enrollments
+  GET    /students                          [admin]  List all students
+  GET    /students/{matricNumber}           [admin]  Get single student
+  DELETE /students/{matricNumber}/embeddings  [admin]  Delete global embeddings
+  GET    /students/{matricNumber}/enrollments  [admin]  List enrollments
 
 SESSIONS
-  POST   /sessions                          Start a new session
-  GET    /sessions?courseCode=X             List sessions by course
-  GET    /sessions?classId=X               List sessions by classroom
-  GET    /sessions?classId=X&status=active  Filter by status
-  GET    /sessions/{sessionId}              Get single session
-  POST   /sessions/{sessionId}/end          End a session
-  GET    /sessions/{sessionId}/attendance   Get all attendance records
-  PUT    /sessions/{sessionId}/attendance/{matric}  Manual present/absent toggle
-  POST   /sessions/{sessionId}/capture      Snapshot current attendees
+  POST   /sessions                          [lecturer+admin] Start a session
+  GET    /sessions?courseCode=X             [lecturer+admin] List by course
+  GET    /sessions?classId=X               [lecturer+admin] List by classroom
+  GET    /sessions?classId=X&status=active  [lecturer+admin] Filter by status
+  GET    /sessions/{sessionId}              [lecturer+admin] Get single session
+  POST   /sessions/{sessionId}/end          [lecturer+admin] End a session
+  GET    /sessions/{sessionId}/attendance   [lecturer+admin] Attendance records
+  PUT    /sessions/{sessionId}/attendance/{matric}  [lecturer+admin] Manual
+                                                      present/absent toggle
+  POST   /sessions/{sessionId}/capture      [lecturer+admin] Snapshot attendees
 
-REGISTRATION (requires login as an active student)
-  GET    /register/{token}                  Resolve token to course info
-  POST   /courses/{courseCode}/register     Student self-registration (multipart).
-                                            matricNumber/fullName come from the
-                                            caller's token — not request fields
-                                            at all, so a student can only ever
-                                            register their own face.
+REGISTRATION
+  GET    /register/{token}                  [student]  Resolve token to
+                                                      course info
+  POST   /courses/{courseCode}/register     [student]  Self-registration
+                                                      (multipart). matricNumber
+                                                      /fullName come from the
+                                                      caller's token — not
+                                                      request fields at all,
+                                                      so a student can only
+                                                      ever register their
+                                                      own face.
 
 BIOMETRICS (consent withdrawal)
-  DELETE /courses/{courseCode}/students/biometrics  Erase student face data
+  DELETE /courses/{courseCode}/students/biometrics  [self or admin]
 
-STUDENT PORTAL (requires login — self or admin)
-  GET    /students/lookup/{matricNumber}    Full attendance summary, plus an
-                                            "identity" block (email, role,
-                                            emailVerifiedAt, lastLoginAt) per
-                                            NDPA s.34. A student may only pass
-                                            their own matric number; an admin
-                                            may pass any.
+STUDENT PORTAL
+  GET    /students/lookup/{matricNumber}    [self or admin]  Full attendance
+                                                      summary, plus an
+                                                      "identity" block
+                                                      (email, role,
+                                                      emailVerifiedAt,
+                                                      lastLoginAt) per
+                                                      NDPA s.34.
 
 REAL-TIME
-  WS     /ws                               WebSocket stream — requires the
-                                           JWT as the first message sent
-                                           after the connection opens
+  WS     /ws                               [any]   WebSocket stream —
+                                                      requires the JWT as
+                                                      the first message sent
+                                                      after the connection
+                                                      opens
 
-AUTHENTICATION (added by the auth work — see AUTH_CHANGES.md)
-  POST   /auth/request-code                 { email } → sends a one-time code
-  POST   /auth/verify-code                  { email, code } → { token, user }
-  GET    /auth/me                           Current user (requires login)
-  PATCH  /auth/me                           { fullName } (requires login)
-  POST   /auth/logout                       204 — stateless, client discards
-                                            the token
+AUTHENTICATION
+  POST   /auth/request-code                 [public]  { email } → sends a
+                                                      one-time code (works
+                                                      for a brand-new email)
+  POST   /auth/verify-code                  [public]  { email, code } →
+                                                      { token, user } —
+                                                      creates the account on
+                                                      first success if it
+                                                      didn't already exist
+  GET    /auth/me                           [any logged-in]  Current user
+  PATCH  /auth/me                           [any logged-in]  { fullName }
+  POST   /auth/logout                       [any logged-in]  204 — stateless,
+                                                      client discards token
 
-ADMINISTRATION (admin role required)
-  GET    /admin/users                       ?role=pending|student|lecturer|admin
-  PUT    /admin/users/{email}/role          { role, staffId?, fullName? } —
-                                            an admin cannot demote their own
-                                            account
-  PUT    /admin/users/{email}/status        { status: "active"|"suspended" }
+ADMINISTRATION
+  GET    /admin/users                       [admin]  ?role=pending|student|
+                                                      lecturer|admin
+  PUT    /admin/users/{email}/role          [admin]  { role, staffId?,
+                                                      fullName? } — an admin
+                                                      cannot demote their own
+                                                      account
+  PUT    /admin/users/{email}/status        [admin]  { status:
+                                                      "active"|"suspended" }
 
 ENDPOINT PROTECTION
-  As of the auth work, every endpoint above except the ones explicitly marked
-  "public" now requires a valid JWT (Authorization: Bearer header), and most
-  require a specific role or resource ownership (e.g. only the lecturer
-  assigned to a course, or an admin, can manage its sessions; a student can
-  only read their own record). POST /classrooms/{classId}/image is
-  deliberately excluded from JWT auth — camera firmware cannot log in — and
-  currently has no additional check beyond the pre-existing deviceId
-  comparison (a shared-secret header for this endpoint was built and verified
-  once, then reverted pending a decision with the hardware/firmware team; see
-  AUTH_CHANGES.md). Full endpoint-by-endpoint access rules are in
-  AUTH_CHANGES.md's Phase 3 section.
+  Every endpoint above except POST /classrooms/{classId}/image and the two
+  /auth endpoints marked [public] requires a valid JWT (Authorization:
+  Bearer header). See section 5 for the full role-by-role breakdown of what
+  each permission tier actually means in practice, and AUTH_CHANGES.md for
+  the phase-by-phase history of how this was built.
 
 
 ================================================================================
-  10. NDPA COMPLIANCE
+  11. NDPA COMPLIANCE
 ================================================================================
 
 The Nigeria Data Protection Act 2023 compliance is built into the system at
@@ -794,16 +1029,12 @@ the data layer, not bolted on as an afterthought.
   s.34 — Rights of a data subject (including access)
     The student portal (GET /students/lookup/{matricNumber}) returns the
     student's complete attendance history, consent timestamp, consent version,
-    biometric active status, and consent withdrawal date if applicable. Any
-    student can access all data held about them using only their matric number
-    today; Phase 4 of the auth work changes this to read the matric number
-    from the logged-in student's own token instead, with an explicit matric
-    parameter accepted only for administrators.
-
-    The email address collected by the auth work (see section 8) is personal
-    data under the Act and falls under this same right of access — it should
-    appear alongside the existing consent and attendance fields in any s.34
-    response, and in the registration privacy notice.
+    biometric active status, and consent withdrawal date if applicable, plus
+    an identity block (email, role, emailVerifiedAt, lastLoginAt). A student
+    may only pass their own matric number; an admin may pass any
+    (require_self_or_admin). The email address collected by the auth work is
+    personal data under the Act and is included in this same right-of-access
+    response.
 
   s.34 — Right to erasure, with s.35 — Withdrawal of consent
     DELETE /courses/{courseCode}/students/biometrics
@@ -814,10 +1045,9 @@ the data layer, not bolted on as an afterthought.
 
     This endpoint is exercised as a withdrawal of consent under s.35, which
     triggers erasure of the data that was processed on that consent basis;
-    erasure itself sits under s.34. (Previously cited here as s.36 — s.36 is
-    the right to object, which is not what this endpoint does. Verify the
-    exact subsection numbering against the gazetted NDPA text before relying
-    on any of these citations in submission material.)
+    erasure itself sits under s.34. Verify the exact subsection numbering
+    against the gazetted NDPA text before relying on any of these citations
+    in submission material.
 
   Manual alternative
     The system never makes biometric consent compulsory. Every registration
@@ -828,19 +1058,29 @@ the data layer, not bolted on as an afterthought.
 
 
 ================================================================================
-  11. DEPLOYMENT
+  12. DEPLOYMENT
 ================================================================================
 
-BACKEND
+BACKEND — LIGHT (Render)
+  Requirements: Python 3.11, requirements-light.txt (no YOLO/face_recognition)
+  Environment:  JWT_SECRET, MONGO_URI, MAILER_URL, MAILER_SECRET,
+                ADMIN_EMAILS, VITE_-equivalent Cloudinary vars if it proxies
+                image uploads, plus whatever main-light.py's env.py requires
+  Auto-deploys from this repo's main branch (Render dashboard).
+
+BACKEND — HEAVY (currently AWS/DuckDNS-hosted)
   Requirements: Python 3.11, all packages in requirements.txt
   Start command: uvicorn main:app --host 0.0.0.0 --port 8000
-  Environment:  backend/.env file with the following vars:
-    DATABASE_URL          MongoDB Atlas connection string (with TLS)
-    CLOUDINARY_API_KEY    Cloudinary credentials
-    CLOUDINARY_API_SECRET
-    CLOUDINARY_CLOUD_NAME
+  Environment:  backend/.env file with (at minimum) JWT_SECRET, MONGO_URI,
+                CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
+                CLOUDINARY_CLOUD_NAME, MAILER_URL, MAILER_SECRET,
+                ADMIN_EMAILS
+  NOT on the same auto-deploy pipeline as the light backend — pushing to
+  main does not redeploy this host automatically. Needs its own manual
+  redeploy step whenever main.py changes (e.g. the YOLO threshold fix in
+  section 6).
 
-  On Linux deployment platforms (Render, Railway, Heroku):
+  On Linux deployment platforms (Render, Railway, Heroku, AWS):
     - dlib compiles from source during pip install using the system gcc/g++
     - No pre-built wheel needed — compilation is automatic
     - No numpy version concerns — dlib is compiled against whatever numpy
@@ -853,32 +1093,35 @@ BACKEND
       compiled against numpy 1.x; numpy 2.x changes the C API and breaks it
     - See api_test_review.txt for the full explanation and fix
 
-FRONTEND
+FRONTEND (Vercel)
   Build:   npm run build → produces dist/ folder
-  Serve:   any static file server or CDN
-  Dev:     npm run dev → Vite dev server on port 8080
-  Env:     frontend/.env (VITE_* variables baked into the build at build time)
+  Env:     VITE_API_BASE_URL / VITE_WS_URL, set in the Vercel dashboard —
+           must point at the light backend's Render URL. Changing either
+           requires a rebuild, since Vite bakes VITE_* vars into the bundle
+           at build time.
+  Auto-deploys from this repo's main branch.
+
+MAILER (Vercel — chakam-mailer)
+  Standalone Next.js app, separate deploy from the frontend above. Confirmed
+  working in production — this is what actually sends login-code and
+  capacity-alert emails.
 
 CAMERAS / IoT DEVICES
   Devices must POST to /classrooms/{classId}/image with:
     - deviceId matching the registered deviceId for that classroom
     - A valid image file (JPEG or PNG)
-  The firmware/ directory contains the device-side code.
+  The firmware/ directory contains the device-side code. Points at the
+  heavy backend directly (see section 2's deployment topology).
 
 
 ================================================================================
-  12. KNOWN LIMITATIONS & NOTES
+  13. KNOWN LIMITATIONS & NOTES
 ================================================================================
 
-- Server-side authentication exists (JWT, role- and ownership-checked on the
-  backend — see section 8/9 and AUTH_CHANGES.md) and is enforced on every
-  endpoint, including registration and the student attendance lookup as of
-  the auth work's final phase. The legacy client-side admin password
-  (VITE_ADMIN_PASSWORD) still works in parallel, deliberately — kept as the
-  developer's own temporary testing fallback until the mailer service (which
-  actually delivers login codes by email) is confirmed working. See
-  AUTH_CHANGES.md's Phase 4 section for the four places this touches and
-  what to remove once it's no longer needed.
+- Nothing in this session's changes takes effect on the live site until it
+  is committed, pushed, and (for the heavy backend specifically) manually
+  redeployed — see section 12. Check git status before assuming any fix
+  described in this document is actually live.
 
 - The camera image endpoint (POST /classrooms/{classId}/image) has no secret
   or credential beyond the pre-existing deviceId comparison, which is
@@ -897,9 +1140,11 @@ CAMERAS / IoT DEVICES
   no sessions will see a not-found error rather than an empty results page.
 
 - YOLOv8 nano (yolov8n.pt) is the smallest and fastest YOLO variant. It trades
-  some accuracy for speed. For environments with poor lighting or many people,
-  yolov8s.pt (small) or yolov8m.pt (medium) would detect more accurately at
-  the cost of higher inference time.
+  some accuracy for speed. The confidence threshold was raised from 0.25 to
+  0.5 after live testing showed a single person being over-counted (see
+  section 6) — this has not yet been re-validated against a live camera feed,
+  and yolov8s.pt (small) or yolov8m.pt (medium) remain options if 0.5 still
+  isn't accurate enough, at the cost of higher inference time.
 
 - The face recognition matching threshold is hardcoded at 0.55. This works
   well in controlled classroom settings. Environments with varied lighting or
@@ -907,5 +1152,15 @@ CAMERAS / IoT DEVICES
 
 - Duplicate enrollment returns HTTP 409 Conflict (not 400). This is the correct
   semantic — 409 means "state conflict with the current resource state."
+
+- Courses created before the short-registration-code change still carry
+  their original long UUID registrationToken. Regenerating it requires an
+  explicit admin action (not yet built as a one-click UI feature — currently
+  would need a direct database update or course recreation).
+
+- Analytics.tsx exists in the codebase, fully built against the real
+  classroom API and WebSocket feed, but is deliberately not routed —
+  considered redundant with the Dashboard's live occupancy view. It remains
+  as dead code pending a decision to delete it outright.
 
 ================================================================================
