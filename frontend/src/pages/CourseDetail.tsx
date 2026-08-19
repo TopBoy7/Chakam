@@ -1111,9 +1111,9 @@ const CourseDetail = () => {
                 className="bg-background"
               />
             </div>
-            {editLecturers.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-xs tracking-widest uppercase text-muted-foreground">Assign Lecturer (optional)</Label>
+            <div className="space-y-2">
+              <Label className="text-xs tracking-widest uppercase text-muted-foreground">Assign Lecturer (optional)</Label>
+              {editLecturers.length > 0 ? (
                 <Select value={editLecturerId} onValueChange={setEditLecturerId}>
                   <SelectTrigger className="bg-background">
                     <SelectValue placeholder="No lecturer assigned" />
@@ -1127,8 +1127,16 @@ const CourseDetail = () => {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-            )}
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No lecturers registered yet — add one from the{" "}
+                  <Link to="/lecturers" className="underline underline-offset-2 hover:text-foreground transition-colors">
+                    Lecturers
+                  </Link>{" "}
+                  page first.
+                </p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditCourse(false)} disabled={savingCourse} className="rounded-full text-xs tracking-widest uppercase">
