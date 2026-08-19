@@ -394,10 +394,15 @@ async def upload_image(
         app.state.yolo_model = model
 
     # Run YOLO in executor
+    # conf=0.5 (was 0.25) and augment off — at 0.25 the nano model was counting
+    # low-confidence partial detections (limbs, background clutter) as extra
+    # people; a single person in frame was reading as 2-4. augment=True's
+    # multi-scale merging made this worse, letting one person generate
+    # several overlapping low-confidence boxes NMS didn't fully collapse.
     t_infer_start = time.perf_counter()
     results = await loop.run_in_executor(
         None,
-        lambda: model.predict(img, imgsz=1920, conf=0.25, iou=0.45, augment=True)
+        lambda: model.predict(img, imgsz=1920, conf=0.5, iou=0.45)
     )
     inference_ms = (time.perf_counter() - t_infer_start) * 1000
 

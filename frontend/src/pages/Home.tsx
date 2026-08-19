@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Activity, BarChart3, ClipboardList, ArrowRight, LogIn, LogOut } from "lucide-react";
+import { Activity, ClipboardList, ArrowRight, LogIn, LogOut } from "lucide-react";
 import Navigation from "@/components/Navigation";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -32,14 +32,6 @@ const features = [
   },
   {
     label: "02",
-    title: "Usage Analytics",
-    body: "Fill rates, peak hours, and comparative occupancy across every room — all derived from real sensor data, zero guesswork.",
-    to: "/analytics",
-    cta: "View Analytics",
-    Icon: BarChart3,
-  },
-  {
-    label: "03",
     title: "Attendance Tracking",
     body: "When the lecturer is ready, one button triggers an instant snapshot. Every face in the room is matched and marked present in one shot. Export in CSV, DOCX, or PDF.",
     to: "/attendance",
@@ -189,7 +181,7 @@ const Home = () => {
 
           <div className="grid md:grid-cols-3 gap-0 border border-border rounded-lg overflow-hidden">
             {[
-              { step: "01", title: "Students register", desc: "Each student scans a link shared by their lecturer, enters their matric number, and uploads a passport photo — once, before the semester begins." },
+              { step: "01", title: "Students register", desc: "Each student opens the link shared by their lecturer, signs in with their UNILAG email, and uploads a passport photo — once, before the semester begins." },
               { step: "02", title: "Lecturer captures", desc: "At the moment the lecturer decides attendance is closed, they tap one button. The camera captures a single snapshot of the entire room." },
               { step: "03", title: "Instant results", desc: "Every face is matched against registered photos in seconds. The dashboard shows who is present, allows manual overrides, and exports clean reports." },
             ].map((item, i) => (
