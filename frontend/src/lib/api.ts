@@ -72,6 +72,7 @@ function transformCourse(raw: Record<string, unknown>, studentCount = 0): Course
     registrationToken: (raw.registrationToken as string) || '',
     studentCount,
     createdAt: raw.createdAt as string,
+    lecturerId: (raw.lecturerId as string) ?? null,
   };
 }
 

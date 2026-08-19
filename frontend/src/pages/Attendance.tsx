@@ -37,8 +37,11 @@ import { api } from "@/lib/api";
 import type { Course } from "@/types/attendance";
 
 const Attendance = () => {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
+  // Course creation matches the backend's POST /courses check: admin, or any
+  // lecturer (who is then auto-assigned as the course's own lecturer).
+  const canCreate = isAdmin || user?.role === "lecturer";
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +126,7 @@ const Attendance = () => {
             <p className="text-xs tracking-[0.2em] uppercase text-muted-foreground mb-3">Course Management</p>
             <h1 className="font-serif text-4xl md:text-5xl text-foreground">Attendance</h1>
           </div>
-          {isAdmin && (
+          {canCreate && (
             <button
               type="button"
               onClick={() => setShowCreateDialog(true)}
@@ -167,12 +170,12 @@ const Attendance = () => {
             <div>
               <p className="font-serif text-2xl text-foreground mb-2">No courses yet</p>
               <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-                {isAdmin
+                {canCreate
                   ? "Create your first course to start automated attendance tracking."
                   : "No courses have been created yet."}
               </p>
             </div>
-            {isAdmin && (
+            {canCreate && (
               <button
                 type="button"
                 onClick={() => setShowCreateDialog(true)}

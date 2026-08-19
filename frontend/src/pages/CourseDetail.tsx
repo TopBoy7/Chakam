@@ -116,7 +116,7 @@ function formatElapsed(startedAt: string): string {
 const CourseDetail = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
 
   const [course, setCourse] = useState<Course | null>(null);
   const [students, setStudents] = useState<RegisteredStudent[]>([]);
@@ -163,6 +163,13 @@ const CourseDetail = () => {
   // The backend must enforce this: reject POST /attendance/sessions if an active session
   // already exists for the given courseId.
   const activeSession = sessions.find((s) => s.status === "active") ?? null;
+
+  // Session/enrollment/attendance management on the backend requires "course owner or
+  // admin" (never just "any lecturer") — mirror that here so the lecturer who actually
+  // owns this course can use Start/End Class, capture, enroll, etc. Course rename/
+  // lecturer-reassignment stays admin-only to match PUT /courses/{code}.
+  const isCourseOwner = user?.role === "lecturer" && !!user.staffId && course?.lecturerId === user.staffId;
+  const canManage = isAdmin || isCourseOwner;
 
   // Ticks every second to display a live elapsed timer (e.g. "01m 23s") in the banner.
   // Purely client-side — startedAt from the backend is the source of truth.
@@ -620,15 +627,17 @@ const CourseDetail = () => {
                 </span>
               )}
             </div>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleEndClass}
-              disabled={ending}
-            >
-              <Square className="h-3.5 w-3.5 mr-2" />
-              {ending ? "Ending..." : "End Class"}
-            </Button>
+            {canManage && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleEndClass}
+                disabled={ending}
+              >
+                <Square className="h-3.5 w-3.5 mr-2" />
+                {ending ? "Ending..." : "End Class"}
+              </Button>
+            )}
           </div>
         )}
 
@@ -751,7 +760,7 @@ const CourseDetail = () => {
               {/* Students Tab */}
               <TabsContent value="students" className="space-y-2 focus-visible:outline-none">
                 {/* Enroll existing student action */}
-                {isAdmin && (
+                {canManage && (
                   <div className="flex justify-end mb-2">
                     <Button variant="outline" size="sm" onClick={() => setShowEnroll(true)} className="text-xs tracking-widest uppercase">
                       <UserPlus className="h-3.5 w-3.5 mr-2" />
@@ -821,7 +830,7 @@ const CourseDetail = () => {
                                 {thresholdBadge.label}
                               </span>
                             )}
-                            {isAdmin && (
+                            {canManage && (
                               <button
                                 type="button"
                                 onClick={() => setUnenrollTarget(student)}
@@ -884,7 +893,7 @@ const CourseDetail = () => {
                   <Button
                     className="w-full"
                     onClick={handleStartClass}
-                    disabled={!isAdmin || starting || !selectedClassroomId}
+                    disabled={!canManage || starting || !selectedClassroomId}
                   >
                     <Play className="h-4 w-4 mr-2" />
                     {starting ? "Starting..." : "Start Class"}
@@ -929,42 +938,48 @@ const CourseDetail = () => {
 
                   {/* Primary: on-demand capture trigger.
                       BACKEND: POST /attendance/sessions/:id/capture
-                      Signals the camera to snapshot now, runs recognition, returns records. */}
-                  <Button
-                    className="w-full"
-                    onClick={handleCaptureAttendance}
-                    disabled={capturing || students.length === 0}
-                  >
-                    {capturing ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Capturing…
-                      </>
-                    ) : (
-                      <>
-                        <Camera className="h-4 w-4 mr-2" />
-                        Take Attendance
-                      </>
-                    )}
-                  </Button>
+                      Signals the camera to snapshot now, runs recognition, returns records.
+                      Requires course owner or admin — hidden entirely for anyone else,
+                      since the backend rejects it and there's nothing useful to show. */}
+                  {canManage && (
+                    <Button
+                      className="w-full"
+                      onClick={handleCaptureAttendance}
+                      disabled={capturing || students.length === 0}
+                    >
+                      {capturing ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Capturing…
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="h-4 w-4 mr-2" />
+                          Take Attendance
+                        </>
+                      )}
+                    </Button>
+                  )}
 
                   {/* Fallback: mark everyone present when the camera is unavailable */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full text-xs"
-                    onClick={handleMarkAllPresent}
-                    disabled={markingAll || students.length === 0}
-                  >
-                    {markingAll ? (
-                      <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Marking…</>
-                    ) : (
-                      <>
-                        <UserCheck className="h-3.5 w-3.5 mr-2" />
-                        Mark All Present (camera fallback)
-                      </>
-                    )}
-                  </Button>
+                  {canManage && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs"
+                      onClick={handleMarkAllPresent}
+                      disabled={markingAll || students.length === 0}
+                    >
+                      {markingAll ? (
+                        <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Marking…</>
+                      ) : (
+                        <>
+                          <UserCheck className="h-3.5 w-3.5 mr-2" />
+                          Mark All Present (camera fallback)
+                        </>
+                      )}
+                    </Button>
+                  )}
 
                   {/* Export live attendance snapshot */}
                   {students.length > 0 && (
@@ -1036,25 +1051,38 @@ const CourseDetail = () => {
                               </span>
                             )}
 
-                            <button
-                              type="button"
-                              onClick={() => handleToggleStudentPresence(student)}
-                              disabled={isUpdating}
-                              className="flex-shrink-0 transition-opacity disabled:opacity-50"
-                              aria-label={
-                                isPresent
-                                  ? `Mark ${student.matricNumber} absent`
-                                  : `Mark ${student.matricNumber} present`
-                              }
-                            >
-                              {isUpdating ? (
-                                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                              ) : isPresent ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-500" />
-                              ) : (
-                                <XCircle className="h-5 w-5 text-muted-foreground/60 hover:text-muted-foreground" />
-                              )}
-                            </button>
+                            {canManage ? (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStudentPresence(student)}
+                                disabled={isUpdating}
+                                className="flex-shrink-0 transition-opacity disabled:opacity-50"
+                                aria-label={
+                                  isPresent
+                                    ? `Mark ${student.matricNumber} absent`
+                                    : `Mark ${student.matricNumber} present`
+                                }
+                              >
+                                {isUpdating ? (
+                                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                                ) : isPresent ? (
+                                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                                ) : (
+                                  <XCircle className="h-5 w-5 text-muted-foreground/60 hover:text-muted-foreground" />
+                                )}
+                              </button>
+                            ) : (
+                              // Read-only status for a viewer who can't manage this course
+                              // (backend rejects the toggle for anyone but the owning
+                              // lecturer or an admin) — show status, not a dead control.
+                              <span className="flex-shrink-0" aria-label={isPresent ? "Present" : "Absent"}>
+                                {isPresent ? (
+                                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                                ) : (
+                                  <XCircle className="h-5 w-5 text-muted-foreground/60" />
+                                )}
+                              </span>
+                            )}
                           </div>
                         );
                       })

@@ -11,6 +11,7 @@ export interface Course {
   studentCount: number;    // live count — backend must compute dynamically
   createdAt: string;
   registrationToken: string;
+  lecturerId: string | null;   // staffId of the assigned lecturer, or null if unassigned
 }
 
 export interface RegisteredStudent {

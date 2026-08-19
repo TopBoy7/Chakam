@@ -483,18 +483,25 @@ async def delete_lecturer(
 @app.post("/courses", response_model=schemas.ResponseModel, status_code=status.HTTP_201_CREATED)
 async def create_course(
     req: schemas.CreateCourseRequest,
-    _admin: models.User = Depends(auth.require_role("admin")),
+    user: models.User = Depends(auth.require_role("lecturer", "admin")),
 ):
     existing = await database.get_course_by_courseCode(req.courseCode)
     if existing:
         raise HTTPException(409, "courseCode already exists")
 
-    if req.lecturerId:
-        lecturer = await database.get_lecturer_by_staffId(req.lecturerId)
+    payload = req.model_dump()
+    if user.role == "lecturer":
+        # A lecturer creating a course always becomes its lecturer — never let
+        # the request body assign the course to someone else.
+        if not user.staffId:
+            raise HTTPException(403, "your account is not linked to a lecturer profile")
+        payload["lecturerId"] = user.staffId
+    elif payload.get("lecturerId"):
+        lecturer = await database.get_lecturer_by_staffId(payload["lecturerId"])
         if not lecturer:
             raise HTTPException(404, "lecturer not found")
 
-    course = models.Course(**req.model_dump(), registrationToken=await database.generate_unique_registration_code())
+    course = models.Course(**payload, registrationToken=await database.generate_unique_registration_code())
     inserted_id = await database.add_course(course)
 
     return {

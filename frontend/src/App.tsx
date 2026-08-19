@@ -45,7 +45,7 @@ const App = () => (
             />
             <Route
               path="/attendance/course/:courseId"
-              element={<ProtectedRoute allowedRoles={["student", "lecturer", "admin"]}><CourseDetail /></ProtectedRoute>}
+              element={<ProtectedRoute allowedRoles={["lecturer", "admin"]}><CourseDetail /></ProtectedRoute>}
             />
             <Route
               path="/register/:token"

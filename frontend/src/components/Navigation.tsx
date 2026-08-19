@@ -19,6 +19,8 @@ const Navigation = () => {
   // Close mobile menu on route change
   useEffect(() => setIsOpen(false), [location.pathname]);
 
+  // "My Attendance" (/my-attendance) is a student-only route — showing it to
+  // lecturers/admins would just redirect them away when clicked.
   const links = isAdmin
     ? [
         { to: "/", label: "Home" },
@@ -26,14 +28,13 @@ const Navigation = () => {
         { to: "/lecturers", label: "Lecturers" },
         { to: "/students", label: "Students" },
         { to: "/attendance", label: "Attendance" },
-        { to: "/my-attendance", label: "My Attendance" },
-        ...(user?.role === "admin" ? [{ to: "/admin/users", label: "Users" }] : []),
+        { to: "/admin/users", label: "Users" },
       ]
     : [
         { to: "/", label: "Home" },
         { to: "/dashboard", label: "Dashboard" },
         { to: "/attendance", label: "Attendance" },
-        { to: "/my-attendance", label: "My Attendance" },
+        ...(user?.role === "student" ? [{ to: "/my-attendance", label: "My Attendance" }] : []),
       ];
 
   const isActive = (to: string) => {
