@@ -25,7 +25,7 @@ const features = [
   {
     label: "01",
     title: "Live Occupancy",
-    body: "Classroom status updates the instant it changes — IoT sensors push data over WebSocket so the dashboard is always current.",
+    body: "Classroom status updates every few seconds — IoT cameras push data over WebSocket so the dashboard is always current.",
     to: "/dashboard",
     cta: "Open Dashboard",
     Icon: Activity,
@@ -33,7 +33,7 @@ const features = [
   {
     label: "02",
     title: "Attendance Tracking",
-    body: "When the lecturer is ready, one button triggers an instant snapshot. Every face in the room is matched and marked present in one shot. Export in CSV, DOCX, or PDF.",
+    body: "When the lecturer is ready, one button triggers an instant snapshot. Every face in the room is matched and marked present in one shot. Export in CSV, JSON, DOCX, or PDF.",
     to: "/attendance",
     cta: "Manage Courses",
     Icon: ClipboardList,
@@ -42,7 +42,7 @@ const features = [
 
 /* ── Stat items ─────────────────────────────────────────────────────────── */
 const stats = [
-  { value: "< 5 s", label: "Occupancy update latency" },
+  { value: "Seconds", label: "Occupancy update latency" },
   { value: "1 tap", label: "To capture full attendance" },
   { value: "4", label: "Export formats supported" },
   { value: "∞", label: "Classrooms monitored" },
@@ -181,7 +181,7 @@ const Home = () => {
 
           <div className="grid md:grid-cols-3 gap-0 border border-border rounded-lg overflow-hidden">
             {[
-              { step: "01", title: "Students register", desc: "Each student opens the link shared by their lecturer, signs in with their UNILAG email, and uploads a passport photo — once, before the semester begins." },
+              { step: "01", title: "Students register", desc: "Each student opens the link shared by their lecturer, signs in with their UNILAG email, and uploads a few passport photos — once, whenever their lecturer shares the link." },
               { step: "02", title: "Lecturer captures", desc: "At the moment the lecturer decides attendance is closed, they tap one button. The camera captures a single snapshot of the entire room." },
               { step: "03", title: "Instant results", desc: "Every face is matched against registered photos in seconds. The dashboard shows who is present, allows manual overrides, and exports clean reports." },
             ].map((item, i) => (

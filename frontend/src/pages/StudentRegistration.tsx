@@ -67,7 +67,7 @@
 // =============================================================================
 //   Body: { matricNumber: string }
 //
-//   The student has the right to erasure under NDPA s.36. This must be instant.
+//   The student has the right to erasure under NDPA s.34. This must be instant.
 //
 //   1. Find student by (courseId, matricNumber). Return 404 if not found.
 //   2. Delete all stored embeddings for this student (set embeddings: []).
@@ -290,7 +290,7 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">What is stored</p>
               <p className="text-xs leading-relaxed">
-                Your matric number, your face embedding (128 numbers, AES-256 encrypted), and
+                Your matric number, your face embedding (128 numbers), and
                 a record that you gave consent with the exact date and time. Nothing else.
               </p>
             </div>
@@ -320,8 +320,8 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">Retention</p>
               <p className="text-xs leading-relaxed">
-                Your embedding is deleted at the end of the academic session, or immediately
-                upon your request — whichever comes first.
+                Your embedding is kept for as long as you're enrolled in this course. You can
+                delete it immediately at any time from the My Attendance page.
               </p>
             </div>
 
@@ -329,8 +329,8 @@ const StudentRegistration = () => {
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-widest text-foreground">Your rights (NDPA 2023)</p>
               <p className="text-xs leading-relaxed">
-                You have the right to access your data (s.34), correct it (s.35), erase it (s.36),
-                and object to processing (s.38). To delete your embedding, visit the{" "}
+                You have the right to access, correct, and erase your data (s.34), and to
+                object to processing (s.36). To delete your embedding, visit the{" "}
                 <a href="/my-attendance" className="underline underline-offset-2 hover:text-foreground transition-colors">
                   My Attendance
                 </a>{" "}
@@ -343,7 +343,8 @@ const StudentRegistration = () => {
               <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
               <p className="text-xs leading-relaxed">
                 <strong className="text-foreground">No consent? No problem.</strong> You do not need
-                to register here. Your lecturer will record your attendance manually.{" "}
+                to register here. Your lecturer can still add you to the course and will mark your
+                attendance by hand each session.{" "}
                 <strong className="text-foreground">There is no academic penalty for opting out.</strong>
               </p>
             </div>

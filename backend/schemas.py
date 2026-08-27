@@ -110,6 +110,10 @@ class UpdateCourseRequest(BaseModel):
 # -------------------------------------------------------
 class EnrollStudentRequest(BaseModel):
     matricNumber: str
+    # Only required when the student has no existing record (i.e. they never
+    # completed biometric self-registration). Creates a manual-only student —
+    # no embeddings, always marked present by the lecturer, never auto-matched.
+    fullName: Optional[str] = None
 
     model_config = {
         "json_schema_extra": {

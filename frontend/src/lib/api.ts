@@ -312,11 +312,11 @@ export const api = {
         return raw.map(transformEnrollment);
       },
 
-      enroll: async (courseCode: string, matricNumber: string): Promise<void> => {
+      enroll: async (courseCode: string, matricNumber: string, fullName?: string): Promise<void> => {
         await throwOnError(await apiFetch(`${API_BASE}/courses/${courseCode}/enrollments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ matricNumber }),
+          body: JSON.stringify({ matricNumber, ...(fullName ? { fullName } : {}) }),
         }));
       },
 
@@ -340,6 +340,7 @@ export const api = {
           fullName: (s.fullName as string) || '',
           courseId: courseCode,
           registeredAt: s.registeredAt as string,
+          hasBiometrics: (s.hasBiometrics as boolean) ?? true,
         }));
       },
 

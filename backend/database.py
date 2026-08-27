@@ -512,8 +512,12 @@ async def get_enrolled_students_details(courseCode: str) -> List[Dict]:
             return []
         students = await db.students.find(
             {"matricNumber": {"$in": matric_numbers}},
-            {"_id": 0, "matricNumber": 1, "fullName": 1, "registeredAt": 1, "embeddingsDeleted": 1},
+            {"_id": 0, "matricNumber": 1, "fullName": 1, "registeredAt": 1,
+             "embeddingsDeleted": 1, "embeddings": 1},
         ).to_list(length=5000)
+        for s in students:
+            s["hasBiometrics"] = bool(s.get("embeddings")) and not s.get("embeddingsDeleted")
+            s.pop("embeddings", None)  # never leak raw embeddings to the client
         student_map = {s["matricNumber"]: s for s in students}
         return [student_map[m] for m in matric_numbers if m in student_map]
     except Exception as e:

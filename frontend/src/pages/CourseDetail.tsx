@@ -145,6 +145,7 @@ const CourseDetail = () => {
   // Enroll student
   const [showEnroll, setShowEnroll] = useState(false);
   const [enrollMatric, setEnrollMatric] = useState("");
+  const [enrollFullName, setEnrollFullName] = useState("");
   const [enrolling, setEnrolling] = useState(false);
 
   // Unenroll student
@@ -461,11 +462,16 @@ const CourseDetail = () => {
     if (!courseId || !enrollMatric.trim()) return;
     setEnrolling(true);
     try {
-      await api.attendance.enrollments.enroll(courseId, enrollMatric.trim().toUpperCase());
+      await api.attendance.enrollments.enroll(
+        courseId,
+        enrollMatric.trim().toUpperCase(),
+        enrollFullName.trim() || undefined
+      );
       // Refresh student list
       const updated = await api.attendance.students.list(courseId);
       setStudents(updated);
       setEnrollMatric("");
+      setEnrollFullName("");
       setShowEnroll(false);
       toast.success("Student enrolled");
     } catch (err) {
@@ -824,6 +830,11 @@ const CourseDetail = () => {
                                 Registered{" "}
                                 {format(new Date(student.registeredAt), "MMM d, yyyy")}
                               </p>
+                              {!student.hasBiometrics && (
+                                <p className="text-xs text-warning mt-0.5">
+                                  No face on file — mark present manually
+                                </p>
+                              )}
                             </div>
                             {thresholdBadge && (
                               <span className={`text-xs font-mono font-medium flex-shrink-0 ${thresholdBadge.cls}`}>
@@ -1154,14 +1165,16 @@ const CourseDetail = () => {
       </Dialog>
 
       {/* ── Enroll Student Dialog ──────────────────────────────────────────── */}
-      <Dialog open={showEnroll} onOpenChange={(open) => { setShowEnroll(open); if (!open) setEnrollMatric(""); }}>
+      <Dialog open={showEnroll} onOpenChange={(open) => { setShowEnroll(open); if (!open) { setEnrollMatric(""); setEnrollFullName(""); } }}>
         <DialogContent className="bg-card sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-serif text-xl font-normal">Enroll Student</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-xs text-muted-foreground leading-relaxed">
-              The student must already be registered in the system. Enter their matric number to enroll them in this course.
+              Enter the student's matric number. If they've already registered biometrics for
+              any course, that's all that's needed. If not, add their name too — they'll be
+              enrolled without face recognition and you'll mark their attendance by hand.
             </p>
             <div className="space-y-2">
               <Label htmlFor="enrollMatric" className="text-xs tracking-widest uppercase text-muted-foreground">Matric Number</Label>
@@ -1174,9 +1187,22 @@ const CourseDetail = () => {
                 onKeyDown={(e) => e.key === "Enter" && handleEnrollStudent()}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="enrollFullName" className="text-xs tracking-widest uppercase text-muted-foreground">
+                Full Name <span className="normal-case text-muted-foreground/60">(only if not already registered)</span>
+              </Label>
+              <Input
+                id="enrollFullName"
+                placeholder="e.g. Ade Bello"
+                value={enrollFullName}
+                onChange={(e) => setEnrollFullName(e.target.value)}
+                className="bg-background"
+                onKeyDown={(e) => e.key === "Enter" && handleEnrollStudent()}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowEnroll(false); setEnrollMatric(""); }} disabled={enrolling} className="rounded-full text-xs tracking-widest uppercase">
+            <Button variant="outline" onClick={() => { setShowEnroll(false); setEnrollMatric(""); setEnrollFullName(""); }} disabled={enrolling} className="rounded-full text-xs tracking-widest uppercase">
               Cancel
             </Button>
             <Button

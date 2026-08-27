@@ -299,7 +299,7 @@ const StudentPortal = () => {
                         ) : (
                           <div className="flex items-center justify-between gap-4">
                             <p className="text-xs text-muted-foreground leading-relaxed">
-                              Under NDPA s.36, you may delete your face embedding at any time.
+                              Under NDPA s.34, you may delete your face embedding at any time.
                             </p>
                             <button
                               type="button"

@@ -863,15 +863,35 @@ async def enroll_student(
         raise HTTPException(404, "course not found")
     auth.assert_course_access(course, user)
 
-    student = await database.get_student_by_matric(req.matricNumber)
-    if not student:
-        raise HTTPException(404, "student not found — student must register first")
+    matric = req.matricNumber.strip().upper()
 
-    existing = await database.get_enrollment(courseCode, req.matricNumber)
+    student = await database.get_student_by_matric(matric)
+    if not student:
+        full_name = (req.fullName or "").strip()
+        if not full_name:
+            raise HTTPException(
+                422,
+                "student has no biometric record — provide fullName to enroll "
+                "them without face registration (they'll be marked present manually)",
+            )
+        # Manual-only student: no embeddings, never auto-matched by the
+        # recognition pipeline (get_students_for_recognition filters on
+        # embeddings existing and non-empty) — the lecturer marks them by hand.
+        manual_student = models.Student(
+            matricNumber=matric,
+            fullName=full_name,
+            embeddings=[],
+            biometricConsent=False,
+            manualAltConsent=True,
+            ageConsent=False,
+        )
+        await database.add_student(manual_student)
+
+    existing = await database.get_enrollment(courseCode, matric)
     if existing:
         raise HTTPException(409, "student already enrolled in this course")
 
-    enrollment = models.Enrollment(courseCode=courseCode, matricNumber=req.matricNumber)
+    enrollment = models.Enrollment(courseCode=courseCode, matricNumber=matric)
     inserted_id = await database.add_enrollment(enrollment)
 
     return {
@@ -1241,7 +1261,7 @@ async def delete_course_student_biometrics(
     req: schemas.DeleteBiometricsRequest,
     user: models.User = Depends(auth.get_current_user),
 ):
-    """Delete a student's face embeddings for consent withdrawal (NDPA s.36).
+    """Delete a student's face embeddings for consent withdrawal (NDPA s.34).
     Body: { matricNumber: string }"""
     matric = req.matricNumber.strip().upper()
     if user.role != "admin" and user.matricNumber != matric:

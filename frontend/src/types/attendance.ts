@@ -21,6 +21,7 @@ export interface RegisteredStudent {
   courseId: string;
   registeredAt: string;
   photoUrl?: string;  // never populated — photos are not stored (NDPA s.24)
+  hasBiometrics: boolean;  // false for manually-enrolled students — never auto-matched, mark by hand
 }
 
 export interface Session {
