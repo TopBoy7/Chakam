@@ -415,6 +415,7 @@ async def mark_attendance(
             "markedAt": datetime.now(),
             "method": method,
             "manuallyOverridden": False,
+            "present": True,
         }
         await db.sessions.update_one(
             {"sessionId": sessionId}, {"$push": {"attendees": entry}}
@@ -429,38 +430,38 @@ async def manual_attendance_override(
     sessionId: str, matricNumber: str, fullName: str, present: bool
 ) -> Union[models.Session, None]:
     """Lecturer manually marks a student present or absent.
-    Sets manuallyOverridden=True so auto recognition won't touch this record."""
+    Sets manuallyOverridden=True so auto recognition won't touch this record.
+    An absent override is stored as an explicit present=False entry — NOT
+    removed from the array — otherwise there is no lock left behind and the
+    very next matching auto-recognition frame silently re-marks the student
+    present, which defeats the point of the override."""
     try:
-        if present:
-            # Upsert the entry: update if exists, push if not.
-            result = await db.sessions.update_one(
-                {"sessionId": sessionId, "attendees.matricNumber": matricNumber},
-                {
-                    "$set": {
-                        "attendees.$.markedAt": datetime.now(),
-                        "attendees.$.method": "manual",
-                        "attendees.$.manuallyOverridden": True,
-                        "attendees.$.fullName": fullName,
-                    }
-                },
-            )
-            if result.matched_count == 0:
-                # Student not yet in list — add them.
-                entry = {
-                    "matricNumber": matricNumber,
-                    "fullName": fullName,
-                    "markedAt": datetime.now(),
-                    "method": "manual",
-                    "manuallyOverridden": True,
+        # Upsert the entry: update if exists, push if not. Same shape for
+        # present and absent overrides — only the `present` value differs.
+        result = await db.sessions.update_one(
+            {"sessionId": sessionId, "attendees.matricNumber": matricNumber},
+            {
+                "$set": {
+                    "attendees.$.markedAt": datetime.now(),
+                    "attendees.$.method": "manual",
+                    "attendees.$.manuallyOverridden": True,
+                    "attendees.$.fullName": fullName,
+                    "attendees.$.present": present,
                 }
-                await db.sessions.update_one(
-                    {"sessionId": sessionId}, {"$push": {"attendees": entry}}
-                )
-        else:
-            # Mark absent = remove the entry if it exists (or leave absent by omission).
+            },
+        )
+        if result.matched_count == 0:
+            # Student not yet in list — add them.
+            entry = {
+                "matricNumber": matricNumber,
+                "fullName": fullName,
+                "markedAt": datetime.now(),
+                "method": "manual",
+                "manuallyOverridden": True,
+                "present": present,
+            }
             await db.sessions.update_one(
-                {"sessionId": sessionId},
-                {"$pull": {"attendees": {"matricNumber": matricNumber}}},
+                {"sessionId": sessionId}, {"$push": {"attendees": entry}}
             )
 
         doc = await db.sessions.find_one({"sessionId": sessionId})

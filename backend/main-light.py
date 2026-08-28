@@ -876,7 +876,7 @@ async def get_attendance(
             "startedAt": session.startedAt.isoformat(),
             "endedAt": session.endedAt.isoformat() if session.endedAt else None,
             "attendees": [a.model_dump() for a in session.attendees],
-            "totalPresent": len(session.attendees),
+            "totalPresent": sum(1 for a in session.attendees if a.present),
         },
     }
 
@@ -1102,7 +1102,7 @@ async def capture_attendance(
             "sessionId": sessionId,
             "studentId": a.matricNumber,
             "matricNumber": a.matricNumber,
-            "status": "present",
+            "status": "present" if a.present else "absent",
             "detectedAt": a.markedAt.isoformat() if hasattr(a.markedAt, "isoformat") else str(a.markedAt),
             "manuallyOverridden": a.manuallyOverridden,
         }

@@ -125,6 +125,10 @@ class AttendanceEntry(BaseModel):
     markedAt: datetime = Field(default_factory=datetime.now)
     method: str = "auto"      # "auto" | "manual"
     manuallyOverridden: bool = False
+    # False only for a manual "mark absent" override — such an entry stays in
+    # the attendees array (rather than being removed) so manuallyOverridden
+    # keeps blocking auto-recognition from re-marking the student present.
+    present: bool = True
 
 
 class User(BaseModel):

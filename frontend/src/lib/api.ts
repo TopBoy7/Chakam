@@ -77,7 +77,7 @@ function transformCourse(raw: Record<string, unknown>, studentCount = 0): Course
 }
 
 function transformSession(raw: Record<string, unknown>): Session {
-  const attendees = (raw.attendees as unknown[]) ?? [];
+  const attendees = (raw.attendees as Array<Record<string, unknown>>) ?? [];
   return {
     id: raw.sessionId as string,
     courseId: raw.courseCode as string,
@@ -86,7 +86,7 @@ function transformSession(raw: Record<string, unknown>): Session {
     startedAt: raw.startedAt as string,
     endedAt: raw.endedAt as string | undefined,
     status: raw.status as 'active' | 'ended',
-    presentCount: attendees.length,
+    presentCount: attendees.filter((a) => a.present !== false).length,
     totalStudents: 0,
   };
 }
@@ -97,7 +97,7 @@ function transformAttendees(attendees: Array<Record<string, unknown>>, sessionId
     sessionId,
     studentId: a.matricNumber as string,
     matricNumber: a.matricNumber as string,
-    status: 'present' as const,
+    status: (a.present === false ? 'absent' : 'present') as const,
     detectedAt: a.markedAt as string | undefined,
     manuallyOverridden: (a.manuallyOverridden as boolean) ?? false,
   }));

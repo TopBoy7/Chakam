@@ -3,7 +3,7 @@
   TECHNICAL OVERVIEW & ARCHITECTURE DOCUMENT
 ================================================================================
 
-  Last updated: 2026-08-19
+  Last updated: 2026-08-28
 
 
 ================================================================================
@@ -360,8 +360,7 @@ STUDENT
       their own JWT, never from the request body, so one student can never
       register as another
     - Delete their own biometric data (DELETE
-      /courses/{code}/students/biometrics) — NDPA s.34/s.35/s.36 right of
-      erasure
+      /courses/{code}/students/biometrics) — NDPA s.34 right of erasure
   Cannot:
     - View another student's data, another course's enrolled-student list,
       or another course's sessions (assert_course_access requires course
@@ -680,14 +679,27 @@ HOW IT WORKS — SESSION AND ATTENDANCE
 
     The lecturer who owns the course (or an admin) can manually set any
     student as present or absent at any time during or after a session:
-      - Sets manuallyOverridden: True on the attendance entry
-      - If status is "present": upserts the entry with method="manual"
-      - If status is "absent": removes the entry from the attendees array
-        (absent is represented by absence, not a flag)
+      - Sets manuallyOverridden: True on the attendance entry, and an
+        explicit present: True/False on the SAME entry — both present and
+        absent overrides are upserted in place, never removed from the
+        attendees array
       - Once manually overridden, face recognition will never modify that
         student's record for the rest of the session
-    A student sees the same status as a read-only indicator — they cannot
-    trigger this action.
+
+    FIXED (2026-08-28): "mark absent" used to $pull (delete) the attendee's
+    entry outright instead of upserting present: False. That left no
+    manuallyOverridden lock behind, so the very next auto-recognition frame
+    that matched the student's face silently re-marked them present —
+    overrides only actually held for the "present" direction, never for
+    "absent". AttendanceEntry now has a real `present: bool = True` field
+    (models.py); manual_attendance_override (database.py) upserts both
+    directions identically; every place that used to treat "member of the
+    attendees array" as synonymous with "present" — totalPresent in
+    GET /sessions/{id}/attendance, the on-image "Present: N" annotation
+    label, the /sessions/{id}/capture stub, and the frontend's
+    transformAttendees/transformSession in api.ts — now filters on the
+    `present` field instead of array membership. A student sees the same
+    status as a read-only indicator — they cannot trigger this action.
 
   Step 9 — End session (course owner or admin only)
     POST /sessions/{sessionId}/end
@@ -696,7 +708,8 @@ HOW IT WORKS — SESSION AND ATTENDANCE
     subsequent images will no longer mark attendance for this session. The
     attendance record is frozen.
 
-CONSENT WITHDRAWAL (NDPA s.35/s.36 — Withdrawal of consent / Right to Erasure)
+CONSENT WITHDRAWAL (NDPA s.35 — Withdrawal of consent, giving rise to the
+                     s.34 right of erasure)
   DELETE /courses/{courseCode}/students/biometrics
   Body: { matricNumber }
   Requires login: the student themself, or an admin.
@@ -924,6 +937,20 @@ COURSES
 ENROLLMENTS
   GET    /courses/{courseCode}/enrollments              [lecturer+admin]
   POST   /courses/{courseCode}/enrollments              [lecturer+admin]
+                                                      Body: { matricNumber,
+                                                      fullName? }. fullName
+                                                      is required only when
+                                                      the student has no
+                                                      existing biometric
+                                                      record — supplying it
+                                                      creates a manual-only
+                                                      Student (embeddings: [],
+                                                      biometricConsent: False)
+                                                      that is enrolled but
+                                                      never auto-matched; the
+                                                      lecturer marks them by
+                                                      hand every session. See
+                                                      section 13.
   DELETE /courses/{courseCode}/enrollments/{matric}     [lecturer+admin]
 
 STUDENTS (admin)
@@ -1045,16 +1072,37 @@ the data layer, not bolted on as an afterthought.
 
     This endpoint is exercised as a withdrawal of consent under s.35, which
     triggers erasure of the data that was processed on that consent basis;
-    erasure itself sits under s.34. Verify the exact subsection numbering
-    against the gazetted NDPA text before relying on any of these citations
-    in submission material.
+    erasure itself — along with access, correction, and restriction — sits
+    under s.34 "Rights of a data subject" (the Act bundles all of these as
+    subsections of one section, not four separate sections). s.36 is "Right
+    to object" and s.38 is "Data portability" — neither is erasure, and both
+    were previously miscited in the frontend consent notice as if they were.
 
-  Manual alternative
+    VERIFIED (2026-08-28) against the Act's own Arrangement of Sections
+    (cross-checked via lawnigeria.com and corroborating summaries): s.24
+    principles/minimisation, s.26 consent, s.30 sensitive/biometric data,
+    s.31 children/incapacity, s.34 rights of a data subject (access +
+    correction + erasure + restriction), s.35 withdrawal of consent, s.36
+    right to object, s.37 automated decision-making, s.38 data portability.
+    Every citation in the frontend (StudentRegistration.tsx, StudentPortal.tsx)
+    and backend (main.py docstrings) was corrected to match — see section 13.
+
+  s.30(1)(a) / s.26 — Manual alternative, now backed by a real code path
     The system never makes biometric consent compulsory. Every registration
     page explicitly states that a manual attendance alternative is available
     and that not consenting carries no academic penalty. The manualAltConsent
     checkbox confirms the student understood this — and is required for
     registration to proceed, ensuring the student has genuinely read it.
+
+    This claim used to be aspirational only: POST /courses/{code}/enrollments
+    required an existing Student document, and the only two endpoints that
+    ever create one both required face photos — so a student who declined
+    biometric consent could never actually be added to a course roster by a
+    lecturer. Fixed 2026-08-28 (see section 13) — enroll_student now creates
+    a bare, embeddings-less Student record when the lecturer supplies a
+    fullName for an unregistered matric number. This is why "freely given"
+    (s.26) consent matters here specifically: a promised opt-out with no
+    working system path behind it undercuts the freeness of the consent.
 
 
 ================================================================================
@@ -1162,5 +1210,79 @@ CAMERAS / IoT DEVICES
   classroom API and WebSocket feed, but is deliberately not routed —
   considered redundant with the Dashboard's live occupancy view. It remains
   as dead code pending a decision to delete it outright.
+
+- FIXED 2026-08-28 — Manual "mark absent" override didn't persist. See
+  section 8, Step 8, for the full mechanism. In short: overriding a student
+  to absent used to delete their attendance entry entirely instead of
+  locking it, so the next matching auto-recognition frame silently
+  re-marked them present. AttendanceEntry gained a real `present` field;
+  every present/absent count (backend totalPresent, the image annotation
+  label, the capture stub, frontend transformAttendees/transformSession)
+  was audited and switched from "member of attendees array" to "present
+  field is true". This was caught while building a test script for the
+  final-year project's Test A1 (Manual Override Persistence) — tracing that
+  test's exact code path is what surfaced it.
+
+- FIXED 2026-08-28 — No-photo / manual-only student enrollment now works.
+  POST /courses/{courseCode}/enrollments accepts an optional `fullName`;
+  when the matric number has no existing Student record, a bare one is
+  created (embeddings: [], biometricConsent: False) and enrolled. Recognition
+  already skipped empty-embeddings students correctly (no pipeline change
+  needed) — the gap was purely that no code path could ever create such a
+  student. CourseDetail.tsx's Enroll dialog exposes the new field; the
+  roster shows "No face on file — mark present manually" for these students
+  (backend computes `hasBiometrics` per student in
+  get_enrolled_students_details, never leaking raw embeddings to the
+  client). See section 11 for why this mattered for NDPA s.26 (freely given
+  consent) specifically, not just as a UX gap.
+
+- FIXED 2026-08-28 — Frontend marketing/consent copy corrected to match
+  actual system behaviour (Home.tsx, index.html meta tags,
+  StudentRegistration.tsx, StudentPortal.tsx):
+    - Home.tsx called the camera an "IoT sensor" in one spot vs "IoT camera"
+      everywhere else in the app — reworded for consistency.
+    - The attendance-export feature card listed only 3 formats (CSV, DOCX,
+      PDF) while the stat beside it said "4 formats" — JSON was missing
+      from the prose; exportAttendance.ts genuinely supports all four.
+    - The "< 5 s occupancy update latency" stat didn't hold up: the firmware
+      only uploads a frame every 3 s (firmware.ino), and the backend's own
+      code comment notes server-side processing alone takes ~5 s — reworded
+      to "Seconds" rather than a specific bound that isn't backed by the
+      numbers.
+    - index.html's meta/OG/Twitter/JSON-LD tags called the dashboard "AI
+      analytics" — Analytics.tsx is plain arithmetic/charting over occupancy
+      counts, no model runs at that layer (AI/YOLO only powers the upstream
+      counting). Reworded to "YOLO people-counting".
+    - The "Students register" step claimed registration must happen "before
+      the semester begins" — no such deadline is enforced anywhere in the
+      registration-token code (only a one-time-registration 409 check
+      exists). Reworded to "whenever their lecturer shares the link". Also
+      corrected "uploads a passport photo" (singular) to reflect the actual
+      multi-photo (up to 5) flow.
+    - StudentRegistration.tsx's privacy notice claimed the face embedding is
+      "AES-256 encrypted" — grepped the entire backend for encrypt/AES/
+      cipher and found nothing; `embeddings` is stored as a plain
+      `List[List[float]]` in MongoDB with no application-level encryption.
+      Claim removed rather than left unverified on a legal consent form.
+    - The same notice claimed embeddings are "deleted at the end of the
+      academic session" automatically — no scheduled job or session-end
+      purge exists anywhere in the backend (the only TTL/auto-expiry in the
+      codebase is for login codes). Reworded to describe only what's true:
+      deletion happens immediately on request, not automatically over time.
+
+- Added chakam_attendance_test.py + config.example.json at the repo root
+  (2026-08-28) — an automated test runner for the final-year project's
+  attendance-mode test plan (Tests A1/A2/A4, B1/B2/B3 over the live API).
+  Test A3 (export verification) is NOT automatable and always logs as
+  skipped by design: export runs entirely client-side in the browser
+  (exportAttendance.ts, via docx/jsPDF) with no backend endpoint to call —
+  it must be verified by hand through the dashboard's export buttons. Two
+  things worth knowing if this script is revisited: (1) every backend
+  response is wrapped as {success, message, data} — payload fields are
+  never top-level; (2) POST /sessions takes {courseCode, classId} — the
+  human-readable codes shown in the dashboard (e.g. "CSC301", "ELT"), not
+  MongoDB ObjectIds — and POST /classrooms/{classId}/image needs a
+  multipart field named `file` (not `image`) plus a required `deviceId`
+  form field matching the classroom's registered device.
 
 ================================================================================

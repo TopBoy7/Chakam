@@ -1,0 +1,60 @@
+{
+  "_comment": "Copy this to config.json and fill in your values. Remove _comment lines.",
+
+  "session_label": "Attendance Mode Test — EEE Block B, Room 201  |  2026-08-27",
+  "api_base_url":  "https://YOUR-LIGHT-BACKEND.onrender.com",
+  "lecturer_email":"your.lecturer@unilag.edu.ng",
+  "output_dir":    "./test_results",
+
+  "_comment2": "class_id / course_code are the human-readable codes used everywhere in the app (classroom page shows the class_id, e.g. 'ELT'; course page shows the course_code, e.g. 'CSC301') — NOT MongoDB ObjectIds. The lecturer_email above must belong to the lecturer actually assigned to this course, or an admin account, or every request 403s.",
+  "class_id":     "ELT",
+  "course_code":  "CSC301",
+
+  "_comment2b": "device_id must exactly match the deviceId the classroom was registered with (visible/editable via Edit Classroom in the dashboard). The image upload endpoint rejects any request whose deviceId doesn't match — this simulates the camera's identity, not a physical device you own.",
+  "device_id": "dev-00123",
+
+  "_comment3": "Test A3 (export) cannot be automated — export runs entirely client-side in the browser with no backend endpoint. It is verified manually via the dashboard UI; see the script's module docstring. This field is unused but left here in case a backend export endpoint is added later.",
+  "completed_session_id": null,
+
+  "_comment4": "Local folders containing .jpg/.jpeg/.png photos of each registered student",
+  "test_students": [
+    {
+      "matric":     "190408001",
+      "name":       "Test Student One",
+      "images_dir": "./test_images/enrolled/190408001"
+    },
+    {
+      "matric":     "190408002",
+      "name":       "Test Student Two",
+      "images_dir": "./test_images/enrolled/190408002"
+    }
+  ],
+
+  "_comment5": [
+    "For B1 accuracy testing — one entry per trial.",
+    "images_dir: folder of frames captured during that trial (the camera images).",
+    "ground_truth_present: matric numbers of enrolled students physically present.",
+    "unregistered_present: matric numbers of people in the room who are NOT enrolled.",
+    "Run at different distances and lighting conditions."
+  ],
+  "recognition_trials": [
+    {
+      "name":                 "Trial 1 — 2 m, bright daylight",
+      "images_dir":           "./test_images/trials/trial_1",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": []
+    },
+    {
+      "name":                 "Trial 2 — 3 m, fluorescent",
+      "images_dir":           "./test_images/trials/trial_2",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": []
+    },
+    {
+      "name":                 "Trial 3 — 5 m, mixed light + 1 unregistered",
+      "images_dir":           "./test_images/trials/trial_3",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": ["UNREGISTERED_PERSON_ID"]
+    }
+  ]
+}
