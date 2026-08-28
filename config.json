@@ -1,0 +1,63 @@
+{
+
+  "session_label": "Attendance Mode Test — EEE Block B, Room 201  |  2026-08-28",
+  "api_base_url":  "https://chakam-backend.onrender.com",
+  "lecturer_email":"josephdossantos7@gmail.com",
+  "output_dir":    "./test_results",
+
+
+  "class_id":     "COMP-LAB",
+  "course_code":  "CSC101",
+
+  "device_id": "dev-00134",
+
+  "_comment3": "Test A3 (export) cannot be automated — export runs entirely client-side in the browser with no backend endpoint. It is verified manually via the dashboard UI; see the script's module docstring. This field is unused but left here in case a backend export endpoint is added later.",
+  "completed_session_id": null,
+
+  "_comment4": "Local folders containing .jpg/.jpeg/.png photos of each registered student",
+  "test_students": [
+    {
+      "matric":     "190408010",
+      "name":       "Test Student One",
+      "images_dir": "./test_images/enrolled/190408010"
+    },
+    {
+      "matric":     "190403014",
+      "name":       "Test Student Two",
+      "images_dir": "./test_images/enrolled/190403014"
+    },
+    {
+      "matric":     "190407036",
+      "name":       "Test Student Three",
+      "images_dir": "./test_images/enrolled/190407036"
+    }
+  ],
+
+  "_comment5": [
+    "For B1 accuracy testing — one entry per trial.",
+    "images_dir: folder of frames captured during that trial (the camera images).",
+    "ground_truth_present: matric numbers of enrolled students physically present.",
+    "unregistered_present: matric numbers of people in the room who are NOT enrolled.",
+    "Run at different distances and lighting conditions."
+  ],
+  "recognition_trials": [
+    {
+      "name":                 "Trial 1 — 2 m, bright daylight",
+      "images_dir":           "./test_images/trials/trial_1",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": []
+    },
+    {
+      "name":                 "Trial 2 — 3 m, fluorescent",
+      "images_dir":           "./test_images/trials/trial_2",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": []
+    },
+    {
+      "name":                 "Trial 3 — 5 m, mixed light + 1 unregistered",
+      "images_dir":           "./test_images/trials/trial_3",
+      "ground_truth_present": ["190408001", "190408002"],
+      "unregistered_present": ["UNREGISTERED_PERSON_ID"]
+    }
+  ]
+}

@@ -585,6 +585,30 @@ async def upsert_student_with_embeddings(
         throw_mongo_error()
 
 
+async def refresh_student_consent(matricNumber: str, fullName: str) -> bool:
+    """Record a fresh consent event for a student who already has active
+    embeddings from a previous course and is now registering for another
+    one without re-uploading photos. Deliberately does not touch
+    `embeddings` — this is the reuse path, not a re-registration."""
+    try:
+        result = await db.students.update_one(
+            {"matricNumber": matricNumber},
+            {
+                "$set": {
+                    "fullName": fullName,
+                    "biometricConsent": True,
+                    "manualAltConsent": True,
+                    "ageConsent": True,
+                    "consentTimestamp": datetime.now(),
+                }
+            },
+        )
+        return result.matched_count > 0
+    except Exception as e:
+        print(e)
+        throw_mongo_error()
+
+
 async def delete_student_embeddings_for_course(courseCode: str, matricNumber: str) -> bool:
     """Delete embeddings when a student withdraws consent for a specific course."""
     try:

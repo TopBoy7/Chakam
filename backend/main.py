@@ -1141,15 +1141,36 @@ async def manual_attendance(
 @app.get("/register/{token}", response_model=schemas.ResponseModel)
 async def resolve_registration_token(
     token: str,
-    _user: models.User = Depends(auth.require_role("student")),
+    user: models.User = Depends(auth.require_role("student")),
 ):
-    """Resolve a course registrationToken to a course object.
-    Called by the student registration page on load."""
+    """Resolve a course registrationToken to a course object, plus the
+    calling student's status relative to it — so the registration page can
+    skip straight to an "already registered" state, or skip the photo
+    requirement for a student who already has biometrics from another
+    course, instead of always rendering the full first-time flow."""
     doc = await database.get_course_by_token(token)
     if not doc:
         raise HTTPException(404, "invalid or expired registration link")
     safe = {k: v for k, v in doc.model_dump().items() if k != "embeddings"}
-    return {"success": True, "message": "ok", "data": {"course": safe}}
+
+    matric = user.matricNumber
+    already_enrolled = (await database.get_enrollment(doc.courseCode, matric)) is not None
+    existing_student = await database.get_student_by_matric(matric)
+    has_biometrics = bool(
+        existing_student
+        and existing_student.embeddings
+        and not existing_student.embeddingsDeleted
+    )
+
+    return {
+        "success": True,
+        "message": "ok",
+        "data": {
+            "course": safe,
+            "alreadyEnrolled": already_enrolled,
+            "hasBiometrics": has_biometrics,
+        },
+    }
 
 
 # -------------------------------------------------------
@@ -1182,14 +1203,19 @@ async def register_student_for_course(
     biometricConsent: str = Form(...),
     manualAltConsent: str = Form(...),
     ageConsent: str = Form(...),
-    photos: List[UploadFile] = File(...),
+    photos: Optional[List[UploadFile]] = File(default=None),
     user: models.User = Depends(auth.require_role("student")),
 ):
     """Student self-registration. Matric number and full name come from the
     authenticated user's own token — never from the request — so a student
-    can only ever register their own face. Validates consent, extracts face
-    embeddings from uploaded photos (in memory only — never saved), creates
-    enrollment."""
+    can only ever register their own face. Validates consent, then either:
+      - extracts fresh face embeddings from uploaded photos (in memory
+        only — never saved), or
+      - if the student already has active embeddings from a PREVIOUS course
+        (embeddings are stored once per student, not per course) and no
+        photos were submitted, reuses them and just records a fresh consent
+        event for this course — no redundant photo upload required.
+    Photos remain required for a student with no existing biometric record."""
     if biometricConsent != "true":
         raise HTTPException(422, "biometric consent is required")
     if manualAltConsent != "true":
@@ -1208,34 +1234,52 @@ async def register_student_for_course(
     if existing_enrollment:
         raise HTTPException(409, "already registered for this course")
 
+    photos = photos or []
     if len(photos) > 5:
         raise HTTPException(400, "maximum 5 registration photos allowed")
 
-    try:
-        import face_recognition
-    except ImportError:
+    existing_student = await database.get_student_by_matric(matric)
+    has_existing_biometrics = bool(
+        existing_student
+        and existing_student.embeddings
+        and not existing_student.embeddingsDeleted
+    )
+
+    if not photos and not has_existing_biometrics:
         raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "face recognition service not available on this server",
+            422, "at least one photo is required — no existing biometric record found"
         )
 
-    import asyncio
-    loop = asyncio.get_running_loop()
-
-    embeddings: List[List[float]] = []
-    for i, photo in enumerate(photos):
-        contents = await photo.read()
+    if photos:
         try:
-            encodings = await loop.run_in_executor(
-                None, lambda c=contents: extract_face_encodings(c)
+            import face_recognition
+        except ImportError:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "face recognition service not available on this server",
             )
-        except Exception as exc:
-            raise HTTPException(400, f"could not process photo {i + 1}: {exc}")
-        if not encodings:
-            raise HTTPException(422, f"no face detected in photo {i + 1}")
-        embeddings.append(encodings[0].tolist())
 
-    await database.upsert_student_with_embeddings(matric, fullName.strip(), embeddings)
+        import asyncio
+        loop = asyncio.get_running_loop()
+
+        embeddings: List[List[float]] = []
+        for i, photo in enumerate(photos):
+            contents = await photo.read()
+            try:
+                encodings = await loop.run_in_executor(
+                    None, lambda c=contents: extract_face_encodings(c)
+                )
+            except Exception as exc:
+                raise HTTPException(400, f"could not process photo {i + 1}: {exc}")
+            if not encodings:
+                raise HTTPException(422, f"no face detected in photo {i + 1}")
+            embeddings.append(encodings[0].tolist())
+
+        await database.upsert_student_with_embeddings(matric, fullName.strip(), embeddings)
+    else:
+        # Reusing existing embeddings from a previous course — still record
+        # a fresh, provable consent event for this registration.
+        await database.refresh_student_consent(matric, fullName.strip())
 
     enrollment = models.Enrollment(courseCode=courseCode, matricNumber=matric)
     await database.add_enrollment(enrollment)

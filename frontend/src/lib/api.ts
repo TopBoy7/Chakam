@@ -351,9 +351,16 @@ export const api = {
         }));
       },
 
-      resolveRegistrationToken: async (token: string): Promise<Record<string, unknown>> => {
+      resolveRegistrationToken: async (
+        token: string
+      ): Promise<{ course: Record<string, unknown>; alreadyEnrolled: boolean; hasBiometrics: boolean }> => {
         const res = await throwOnError(await apiFetch(`${API_BASE}/register/${token}`));
-        return (await res.json()).data.course;
+        const data = (await res.json()).data;
+        return {
+          course: data.course,
+          alreadyEnrolled: Boolean(data.alreadyEnrolled),
+          hasBiometrics: Boolean(data.hasBiometrics),
+        };
       },
 
       deleteBiometrics: async (courseCode: string, matricNumber: string): Promise<void> => {

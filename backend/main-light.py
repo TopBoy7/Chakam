@@ -925,13 +925,36 @@ async def manual_attendance(
 @app.get("/register/{token}", response_model=schemas.ResponseModel)
 async def resolve_registration_token(
     token: str,
-    _user: models.User = Depends(auth.require_role("student")),
+    user: models.User = Depends(auth.require_role("student")),
 ):
+    """Resolve a course registrationToken to a course object, plus the
+    calling student's status relative to it — so the registration page can
+    skip straight to an "already registered" state, or skip the photo
+    requirement for a student who already has biometrics from another
+    course, instead of always rendering the full first-time flow."""
     doc = await database.get_course_by_token(token)
     if not doc:
         raise HTTPException(404, "invalid or expired registration link")
     safe = {k: v for k, v in doc.model_dump().items() if k != "embeddings"}
-    return {"success": True, "message": "ok", "data": {"course": safe}}
+
+    matric = user.matricNumber
+    already_enrolled = (await database.get_enrollment(doc.courseCode, matric)) is not None
+    existing_student = await database.get_student_by_matric(matric)
+    has_biometrics = bool(
+        existing_student
+        and existing_student.embeddings
+        and not existing_student.embeddingsDeleted
+    )
+
+    return {
+        "success": True,
+        "message": "ok",
+        "data": {
+            "course": safe,
+            "alreadyEnrolled": already_enrolled,
+            "hasBiometrics": has_biometrics,
+        },
+    }
 
 
 # -------------------------------------------------------
@@ -963,7 +986,7 @@ async def register_student_for_course(
     biometricConsent: str = Form(...),
     manualAltConsent: str = Form(...),
     ageConsent: str = Form(...),
-    photos: List[UploadFile] = File(...),
+    photos: Optional[List[UploadFile]] = File(default=None),
     _user: models.User = Depends(auth.require_role("student")),
     authorization: str = Header(None),
 ):
@@ -971,9 +994,14 @@ async def register_student_for_course(
     the request. The heavy backend's own /courses/{code}/register derives
     them the same way from its own token decode — the Authorization header
     is forwarded so its require_role("student") dependency re-validates the
-    caller independently, rather than trusting this hop's check alone."""
+    caller independently, rather than trusting this hop's check alone.
+
+    photos is optional here too: a student who already has active
+    embeddings from another course can submit zero photos, and the heavy
+    backend's own logic decides whether that's valid (existing biometrics
+    on file) or a 422 (no photos, no existing record)."""
     contents_list = []
-    for photo in photos:
+    for photo in (photos or []):
         contents = await photo.read()
         contents_list.append((photo.filename or "photo.jpg", contents, photo.content_type or "image/jpeg"))
 

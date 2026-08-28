@@ -101,6 +101,8 @@ const StudentRegistration = () => {
   const [course, setCourse]           = useState<Course | null>(null);
   const [loading, setLoading]         = useState(true);
   const [courseError, setCourseError] = useState<string | null>(null);
+  const [alreadyEnrolled, setAlreadyEnrolled] = useState(false);
+  const [hasBiometrics, setHasBiometrics]     = useState(false);
 
   const [biometricConsent, setBiometricConsent] = useState(false);
   const [manualAltConsent, setManualAltConsent] = useState(false);
@@ -117,8 +119,11 @@ const StudentRegistration = () => {
     if (!token) return;
     const fetchCourse = async () => {
       try {
-        const raw = await api.attendance.students.resolveRegistrationToken(token);
+        const { course: raw, alreadyEnrolled, hasBiometrics } =
+          await api.attendance.students.resolveRegistrationToken(token);
         setCourse({ ...raw, id: raw.courseCode, studentCount: 0 } as Course);
+        setAlreadyEnrolled(alreadyEnrolled);
+        setHasBiometrics(hasBiometrics);
       } catch (err) {
         setCourseError(err instanceof Error ? err.message : "Failed to load registration info");
       } finally {
@@ -158,7 +163,8 @@ const StudentRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!course || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent) return;
+    const photosRequired = !hasBiometrics && photoFiles.length === 0;
+    if (!course || photosRequired || !biometricConsent || !manualAltConsent || !ageConsent) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -203,6 +209,36 @@ const StudentRegistration = () => {
                 {courseError || "This registration link is invalid or has expired."}
               </p>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ── Already registered for this course ──────────────────────────────────────
+  if (alreadyEnrolled) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md text-center">
+          <CardContent className="pt-10 pb-10 space-y-4">
+            <CheckCircle2 className="h-16 w-16 text-success mx-auto" />
+            <div>
+              <h2 className="font-serif text-2xl">You're already registered</h2>
+              <p className="text-muted-foreground mt-2 leading-relaxed max-w-xs mx-auto text-sm">
+                You've already registered for{" "}
+                <Badge variant="secondary" className="font-mono text-xs px-2 py-0.5 mx-0.5">
+                  {course.courseCode}
+                </Badge>{" "}
+                — no need to do it again.
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground pt-2 max-w-xs mx-auto">
+              You can view your attendance or manage your biometric data from the{" "}
+              <a href="/my-attendance" className="underline underline-offset-2 hover:text-foreground transition-colors">
+                My Attendance
+              </a>{" "}
+              page.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -370,10 +406,21 @@ const StudentRegistration = () => {
                 </div>
               </div>
               <span className="text-xs leading-relaxed text-foreground">
-                I understand that my photograph will be used to create a facial recognition
-                template for automated attendance in{" "}
-                <strong>{course.courseCode}</strong>. The photo will be deleted immediately
-                after processing. I can withdraw from this system at any time.
+                {hasBiometrics ? (
+                  <>
+                    I understand that my existing face data (already on file from another
+                    course) will be used for automated attendance in{" "}
+                    <strong>{course.courseCode}</strong> — or a new photo, if I choose to
+                    upload one instead. I can withdraw from this system at any time.
+                  </>
+                ) : (
+                  <>
+                    I understand that my photograph will be used to create a facial recognition
+                    template for automated attendance in{" "}
+                    <strong>{course.courseCode}</strong>. The photo will be deleted immediately
+                    after processing. I can withdraw from this system at any time.
+                  </>
+                )}
               </span>
             </label>
 
@@ -431,7 +478,9 @@ const StudentRegistration = () => {
             <CardTitle className="font-serif text-lg font-normal">Register for attendance tracking</CardTitle>
             <CardDescription className="text-sm">
               {biometricConsent && manualAltConsent && ageConsent
-                ? "Upload clear, front-facing photos. You only need to do this once."
+                ? hasBiometrics
+                  ? "You already have a face on file — no new photos needed. Click Register to enroll."
+                  : "Upload clear, front-facing photos. You only need to do this once."
                 : "Check all three boxes above to continue."}
             </CardDescription>
           </CardHeader>
@@ -452,11 +501,20 @@ const StudentRegistration = () => {
               {/* Multi-photo Upload */}
               <div className="space-y-2">
                 <Label className="text-xs tracking-widest uppercase text-muted-foreground">
-                  Passport Photos ({photoFiles.length}/{MAX_PHOTOS})
+                  Passport Photos ({photoFiles.length}/{MAX_PHOTOS}){hasBiometrics && " — optional"}
                 </Label>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Upload up to {MAX_PHOTOS} clear, front-facing photos — different angles and
-                  lighting improve recognition accuracy. No sunglasses or hats.
+                  {hasBiometrics ? (
+                    <>
+                      You already have a registered face from another course — no need to
+                      upload new photos. Only add some below if you'd like to update it.
+                    </>
+                  ) : (
+                    <>
+                      Upload up to {MAX_PHOTOS} clear, front-facing photos — different angles and
+                      lighting improve recognition accuracy. No sunglasses or hats.
+                    </>
+                  )}
                 </p>
 
                 {/* Preview grid */}
@@ -528,7 +586,7 @@ const StudentRegistration = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={submitting || photoFiles.length === 0 || !biometricConsent || !manualAltConsent || !ageConsent}
+                disabled={submitting || (!hasBiometrics && photoFiles.length === 0) || !biometricConsent || !manualAltConsent || !ageConsent}
               >
                 {submitting ? (
                   <><div className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent mr-2" />Registering…</>
@@ -541,7 +599,7 @@ const StudentRegistration = () => {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground px-4">
-          Chakam processes biometric data under NDPA 2023. Your data is encrypted at rest and in transit.
+          Chakam processes biometric data under NDPA 2023. Your data is encrypted in transit.
         </p>
       </div>
     </div>
