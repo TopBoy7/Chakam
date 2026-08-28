@@ -29,6 +29,7 @@ const Login = () => {
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [pendingUser, setPendingUser] = useState<{ token: string; user: User } | null>(null);
+  const sessionExpired = searchParams.get("reason") === "session_expired";
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -136,6 +137,17 @@ const Login = () => {
             {step === "name" && "This is the first time we've seen this address — tell us your full name."}
           </p>
         </div>
+
+        {sessionExpired && step === "email" && (
+          <Alert className="mb-6">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Your session expired before that finished. Verify again and you'll be brought
+              straight back to continue — nothing you entered on the previous page was saved,
+              so you'll need to redo any form you were filling in.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {step === "email" && (
           <form onSubmit={handleRequestCode} className="space-y-5">

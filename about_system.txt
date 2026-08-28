@@ -1263,7 +1263,13 @@ CAMERAS / IoT DEVICES
       "AES-256 encrypted" — grepped the entire backend for encrypt/AES/
       cipher and found nothing; `embeddings` is stored as a plain
       `List[List[float]]` in MongoDB with no application-level encryption.
-      Claim removed rather than left unverified on a legal consent form.
+      Claim removed rather than left unverified on a legal consent form. This
+      claim appeared in TWO separate places on the same page (the "What is
+      stored" section, and a second, easy-to-miss one in the page footer —
+      "Your data is encrypted at rest and in transit") — both were caught
+      and fixed, but only after the second one turned up in a live
+      screenshot review; a text search for the literal string would have
+      caught both in one pass, worth doing before declaring a claim removed.
     - The same notice claimed embeddings are "deleted at the end of the
       academic session" automatically — no scheduled job or session-end
       purge exists anywhere in the backend (the only TTL/auto-expiry in the
@@ -1271,18 +1277,68 @@ CAMERAS / IoT DEVICES
       deletion happens immediately on request, not automatically over time.
 
 - Added chakam_attendance_test.py + config.example.json at the repo root
-  (2026-08-28) — an automated test runner for the final-year project's
-  attendance-mode test plan (Tests A1/A2/A4, B1/B2/B3 over the live API).
-  Test A3 (export verification) is NOT automatable and always logs as
-  skipped by design: export runs entirely client-side in the browser
-  (exportAttendance.ts, via docx/jsPDF) with no backend endpoint to call —
-  it must be verified by hand through the dashboard's export buttons. Two
-  things worth knowing if this script is revisited: (1) every backend
-  response is wrapped as {success, message, data} — payload fields are
-  never top-level; (2) POST /sessions takes {courseCode, classId} — the
-  human-readable codes shown in the dashboard (e.g. "CSC301", "ELT"), not
-  MongoDB ObjectIds — and POST /classrooms/{classId}/image needs a
-  multipart field named `file` (not `image`) plus a required `deviceId`
-  form field matching the classroom's registered device.
+  (2026-08-28) — an automated test runner for the final-year project's test
+  plan, covering BOTH modes: Attendance Mode (A1/A2/A4 functional,
+  B1/B2/B3 quantitative) and Occupancy Mode (C1/C3/C4 functional, C2
+  semi-manual, D1/D2/D3 quantitative) — 14 tests total, `--test <id>` to
+  run one, `--test all` for the full suite. Two things worth knowing if
+  this script is revisited: (1) every backend response is wrapped as
+  {success, message, data} — payload fields are never top-level; (2) POST
+  /sessions and POST /classrooms/{classId}/image take the human-readable
+  codes shown in the dashboard (e.g. "CSC301", "ELT"), not MongoDB
+  ObjectIds — the latter also needs a multipart field named `file` (not
+  `image`) plus a required `deviceId` form field matching the classroom's
+  registered device.
+
+  Tests A3 (export) and C2 (capacity alert) are NOT automatable and always
+  log as skipped, by design, not a bug: export runs entirely client-side in
+  the browser (exportAttendance.ts, via docx/jsPDF) with no backend
+  endpoint to call; the capacity alert is a real email (send_email.py, via
+  mailer/) that only a human checking the ALERT_EMAIL inbox can confirm.
+  While building C2, found send_occupancy_alert() has no cooldown/throttle
+  — every single over-capacity frame sends a fresh email, not one per
+  "became over capacity" transition. In production the camera uploads
+  roughly every 3s, so a room that stays over capacity for a few minutes
+  means dozens of emails, not one — worth a decision (debounce? one email
+  per session?) before this is relied on in a real classroom.
+
+  C3/D3 (live WebSocket confirmation) required a new capability: the
+  script opens an authenticated `/ws` connection the same way the browser
+  does — connect, then send {"token": ...} as the first text message
+  within 5s (see the /ws handler in main.py/main-light.py) — then waits for
+  a classroom_image_update broadcast. New dependency: `pip install
+  websockets` alongside `requests`.
+
+  Also found and fixed while wiring this up: the user's actual config.json
+  (not the example) had `recognition_trials.ground_truth_present` still
+  set to placeholder matric numbers from config.example.json that didn't
+  match their real test_students — would have silently broken B1's
+  TP/FP/FN comparison against nobody. A reminder that copying the example
+  file forward doesn't get audited by anything; worth a final read-through
+  of config.json against test_students before a real test run.
+
+- Diagnosed (2026-08-28) why a live registration attempt failed with
+  "Field required; Field required": fetched the OpenAPI schema directly
+  from both live backends (GET /openapi.json) and compared against this
+  repo. The LIGHT backend (chakam-backend.onrender.com) matched the current
+  code exactly. The HEAVY backend (chakam-api.duckdns.org, per
+  .env.example) did NOT — its live /courses/{courseCode}/register still
+  requires matricNumber and fullName as raw form fields, a design this
+  repo's main.py has never used (identity has always come from the JWT via
+  require_role("student"), even before this session's changes). The heavy
+  backend is not on the same auto-deploy pipeline as everything else (see
+  section 12) and had simply never been redeployed with current code — not
+  something any change this session broke. Net effect: student
+  self-registration via the web form is broken on production right now,
+  and will stay broken until someone with access manually redeploys the
+  heavy backend. Image-upload and attendance endpoints (used by A1/A2/A4/
+  B1/B2/B3/C1-C4/D1-D3) already matched the live heavy-backend schema at
+  diagnosis time, so those tests may still work against already-registered
+  students even before the redeploy — worth confirming via GET
+  /students/<matric> rather than assuming a failure is test-script error.
+  Lesson for future debugging here: when something that looks correct in
+  the repo fails live, check whether IT'S the heavy backend involved
+  (registration, image upload) before assuming the bug is in new code —
+  the manual-redeploy gap is a standing trap, not a one-time issue.
 
 ================================================================================

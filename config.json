@@ -1,6 +1,6 @@
 {
 
-  "session_label": "Attendance Mode Test — EEE Block B, Room 201  |  2026-08-28",
+  "session_label": "Attendance Mode Test — Intro to Computing, CSC 101  |  2026-08-28",
   "api_base_url":  "https://chakam-backend.onrender.com",
   "lecturer_email":"josephdossantos7@gmail.com",
   "output_dir":    "./test_results",
@@ -44,20 +44,43 @@
     {
       "name":                 "Trial 1 — 2 m, bright daylight",
       "images_dir":           "./test_images/trials/trial_1",
-      "ground_truth_present": ["190408001", "190408002"],
+      "ground_truth_present": ["190408010", "190403014"],
       "unregistered_present": []
     },
     {
       "name":                 "Trial 2 — 3 m, fluorescent",
       "images_dir":           "./test_images/trials/trial_2",
-      "ground_truth_present": ["190408001", "190408002"],
+      "ground_truth_present": ["190408010", "190403014"],
       "unregistered_present": []
     },
     {
       "name":                 "Trial 3 — 5 m, mixed light + 1 unregistered",
       "images_dir":           "./test_images/trials/trial_3",
-      "ground_truth_present": ["190408001", "190408002"],
-      "unregistered_present": ["UNREGISTERED_PERSON_ID"]
+      "ground_truth_present": ["190408010", "190403014"],
+      "unregistered_present": ["190407036"]
+    }
+  ],
+
+  "_comment6": "OCCUPANCY MODE (tests C1/C2, D1) — over_capacity needs a frame showing MORE people than COMP-LAB's real capacity. With only 3 test students, temporarily lower COMP-LAB's capacity via Edit Classroom in the dashboard (then restore it afterward) rather than trying to gather dozens of people.",
+  "occupancy_over_capacity_dir":  "./test_images/occupancy/over_capacity",
+  "occupancy_under_capacity_dir": "./test_images/occupancy/under_capacity",
+
+  "_comment7": "For D1 — true_count MUST be the actual number of people you count with your own eyes in that trial's photo(s), not a guess or copy from another trial. Update each true_count below to match the real photo you drop into that folder.",
+  "occupancy_trials": [
+    {
+      "name":       "Trial 1 — low density, unobstructed",
+      "images_dir": "./test_images/occupancy/trial_1",
+      "true_count": 35
+    },
+    {
+      "name":       "Trial 2 — moderate density",
+      "images_dir": "./test_images/occupancy/trial_2",
+      "true_count": 15
+    },
+    {
+      "name":       "Trial 3 — higher density / some occlusion",
+      "images_dir": "./test_images/occupancy/trial_3",
+      "true_count": 80
     }
   ]
 }

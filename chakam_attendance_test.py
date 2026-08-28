@@ -2,7 +2,7 @@
 """
 chakam_attendance_test.py
 ================================================================================
-Chakam Attendance Mode — Automated Test Runner & Result Logger
+Chakam Test Runner & Result Logger — Attendance Mode (A/B) + Occupancy Mode (C/D)
 
 Usage:
     python chakam_attendance_test.py --config config.json          # all tests
@@ -12,20 +12,20 @@ Results are saved to:
     test_results/<timestamp>/
         results.json   — full structured output per test
         summary.csv    — one-row-per-test pass/fail summary
-        report.txt     — human-readable report (paste into report §4.6)
+        report.txt     — human-readable report (paste into report §4.6/§4.5)
 
 Prerequisites (see config.example.json):
     - At least 2 students registered with photos on the live system
     - A classroom and course already created
     - Images of each registered student saved locally
-    - Session trial images saved locally
+    - Session trial images (attendance) and occupancy trial images saved locally
 
 IMPORTANT — backend response shape:
     Every Chakam API response is wrapped as {"success", "message", "data"}.
-    All payload fields (session id, metrics, attendees, ...) live under
-    "data", never at the top level. Every helper below unwraps that envelope
-    before reading anything — do not add a new API call without doing the
-    same, or it will silently read None/[] instead of erroring.
+    All payload fields (session id, metrics, attendees, classroom, ...) live
+    under "data", never at the top level. Every helper below unwraps that
+    envelope before reading anything — do not add a new API call without
+    doing the same, or it will silently read None/[] instead of erroring.
 
 IMPORTANT — Test A3 (export) cannot be automated against the API:
     Attendance export (CSV/JSON/DOCX/PDF) runs entirely client-side in the
@@ -34,11 +34,18 @@ IMPORTANT — Test A3 (export) cannot be automated against the API:
     manual verification steps instead of making HTTP calls; it always logs
     as "skipped", by design, not a bug.
 
-Dependencies:  pip install requests
+IMPORTANT — Test C2 (capacity alert) is semi-manual for the same reason:
+    the alert is a real email (send_email.py, via the mailer/ service) — the
+    script can trigger it, but only a human checking the ALERT_EMAIL inbox
+    can confirm delivery. Also worth knowing: there is no cooldown/throttle
+    in send_occupancy_alert — every single over-capacity frame sends a new
+    email, not once per "became over capacity" transition.
+
+Dependencies:  pip install requests websockets
 ================================================================================
 """
 
-import os, sys, json, csv, time, argparse, datetime, statistics
+import os, sys, json, csv, time, argparse, datetime, statistics, asyncio
 import requests
 from pathlib import Path
 from typing import Optional, List
@@ -154,7 +161,57 @@ class ChakamTestRunner:
         out = dict(payload.get('metrics') or {})
         out['_wall_ms'] = round(wall_ms, 2)
         out['_attendance'] = payload.get('attendance')
+        out['_classroom'] = payload.get('classroom')
         return out
+
+    def _get_classroom(self, class_id: str) -> Optional[dict]:
+        """GET /classrooms/{classId} — returns the unwrapped classroom dict."""
+        r = requests.get(f'{self.base}/classrooms/{class_id}',
+                         headers=self._headers(), timeout=10)
+        if r.status_code == 200:
+            return (r.json().get('data') or {}).get('classroom')
+        return None
+
+    def _ws_url(self) -> str:
+        return self.base.replace('https://', 'wss://').replace('http://', 'ws://') + '/ws'
+
+    async def _upload_and_wait_for_broadcast(
+        self, class_id: str, image_path: str, timeout: float = 10.0
+    ) -> dict:
+        """Open an authenticated WS connection, upload an image, and wait for
+        the matching classroom_image_update broadcast. Returns
+        {'upload': <_upload_image result>, 'event': <ws message or None>,
+        'latency_ms': <float or None>} — latency is measured from just before
+        the upload starts to when the broadcast is received, so it reflects
+        what a lecturer watching the dashboard actually experiences."""
+        import websockets
+
+        result: dict = {'upload': None, 'event': None, 'latency_ms': None}
+        try:
+            async with websockets.connect(self._ws_url()) as ws:
+                await ws.send(json.dumps({'token': self.token}))
+                loop = asyncio.get_running_loop()
+                t_start = loop.time()
+                result['upload'] = await loop.run_in_executor(
+                    None, lambda: self._upload_image(class_id, image_path)
+                )
+                deadline = loop.time() + timeout
+                while loop.time() < deadline:
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=deadline - loop.time())
+                    except asyncio.TimeoutError:
+                        break
+                    try:
+                        msg = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if msg.get('event') in ('classroom_image_update', 'classroom_updated'):
+                        result['event'] = msg
+                        result['latency_ms'] = round((loop.time() - t_start) * 1000, 2)
+                        break
+        except Exception as e:
+            result['ws_error'] = str(e)
+        return result
 
     def _get_attendees(self, session_id: str) -> List[dict]:
         """Return the attendees list for a session, unwrapped.
@@ -694,6 +751,333 @@ class ChakamTestRunner:
         self._log('B3_e2e_latency', passed, metrics)
 
     # ═══════════════════════════════════════════════════════════════════════
+    # TEST C1 — Occupancy Capped at Capacity
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_c1_occupancy_cap(self):
+        head('TEST C1 — Occupancy Capped at Capacity')
+        cfg      = self.cfg
+        class_id = cfg['class_id']
+        over_dir = cfg.get('occupancy_over_capacity_dir')
+
+        if not over_dir:
+            skip('Set "occupancy_over_capacity_dir" in config to run C1')
+            self._log('C1_occupancy_cap', False, {'skipped': True}); return
+
+        images = self._images_from_dir(over_dir)
+        if not images:
+            skip(f'No images in {over_dir}')
+            self._log('C1_occupancy_cap', False, {'skipped': True}); return
+
+        classroom = self._get_classroom(class_id)
+        if not classroom:
+            fail('Could not read classroom'); return
+        capacity = classroom.get('capacity')
+        info(f'Classroom capacity: {capacity}')
+
+        resp = self._upload_image(class_id, str(images[0]))
+        if '_error' in resp:
+            fail(f'Upload failed: {resp}'); return
+
+        reported = (resp.get('_classroom') or {}).get('occupancy')
+        info(f'Reported occupancy after over-capacity frame: {reported}')
+
+        passed = reported is not None and capacity is not None and reported <= capacity
+        if passed: ok(f'Occupancy capped at {reported} (capacity {capacity})')
+        else:      fail(f'Occupancy {reported} exceeds capacity {capacity} — cap not applied')
+
+        self._log('C1_occupancy_cap', passed, {
+            'capacity': capacity,
+            'reported_occupancy': reported,
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST C2 — Capacity Alert Email (MANUAL confirmation — see module docstring)
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_c2_capacity_alert(self):
+        head('TEST C2 — Capacity Alert Email')
+        cfg       = self.cfg
+        class_id  = cfg['class_id']
+        over_dir  = cfg.get('occupancy_over_capacity_dir')
+        under_dir = cfg.get('occupancy_under_capacity_dir')
+
+        if not over_dir:
+            skip('Set "occupancy_over_capacity_dir" in config to run C2')
+            self._log('C2_capacity_alert', False, {'skipped': True}); return
+
+        if under_dir:
+            under_images = self._images_from_dir(under_dir)
+            if under_images:
+                info('Uploading an under-capacity frame — should NOT trigger an alert…')
+                self._upload_image(class_id, str(under_images[0]))
+                time.sleep(1)
+
+        over_images = self._images_from_dir(over_dir)
+        if not over_images:
+            skip(f'No images in {over_dir}')
+            self._log('C2_capacity_alert', False, {'skipped': True}); return
+
+        info('Uploading an over-capacity frame — SHOULD trigger an alert…')
+        resp = self._upload_image(class_id, str(over_images[0]))
+        if '_error' in resp:
+            fail(f'Upload failed: {resp}'); return
+
+        warn('Alert delivery cannot be confirmed over the API — it is a real email.')
+        info('Check the ALERT_EMAIL inbox now: expect one "Capacity Alert" email for '
+             f'{class_id}, sent only after the over-capacity upload.')
+        warn('No cooldown/throttle exists in send_occupancy_alert() — every single '
+             'over-capacity frame sends a new email. A room that stays over capacity '
+             'in production (camera uploads every ~3s) means one email per upload, '
+             'not one per "became over capacity" transition — worth knowing before '
+             'you leave a real classroom over capacity for any length of time.')
+
+        self._log('C2_capacity_alert', False, {
+            'skipped': True,
+            'reason': 'alert delivery can only be confirmed by checking the ALERT_EMAIL inbox by hand',
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST C3 — Live WebSocket Occupancy Broadcast
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_c3_ws_broadcast(self):
+        head('TEST C3 — Live WebSocket Occupancy Broadcast')
+        cfg      = self.cfg
+        class_id = cfg['class_id']
+        images   = self._images_from_dir(cfg['test_students'][0]['images_dir']) if cfg.get('test_students') else []
+
+        if not images:
+            skip('No images available for C3')
+            self._log('C3_ws_broadcast', False, {'skipped': True}); return
+
+        result = asyncio.run(self._upload_and_wait_for_broadcast(class_id, str(images[0])))
+
+        if result.get('ws_error'):
+            fail(f'WebSocket connection failed: {result["ws_error"]}')
+            self._log('C3_ws_broadcast', False, {'ws_error': result['ws_error']}); return
+
+        event             = result.get('event')
+        upload_occupancy  = ((result.get('upload') or {}).get('_classroom') or {}).get('occupancy')
+        event_occupancy   = ((event or {}).get('classroom') or {}).get('occupancy')
+
+        passed = event is not None and event_occupancy == upload_occupancy
+        if passed:
+            ok(f'Broadcast received in {result.get("latency_ms")} ms, '
+               f'occupancy matches ({event_occupancy})')
+        else:
+            fail('No matching broadcast received, or occupancy mismatch')
+
+        self._log('C3_ws_broadcast', passed, {
+            'received':         event is not None,
+            'latency_ms':       result.get('latency_ms'),
+            'upload_occupancy': upload_occupancy,
+            'event_occupancy':  event_occupancy,
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST C4 — Image Rotation (Cloudinary)
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_c4_image_rotation(self):
+        head('TEST C4 — Image Rotation (Cloudinary)')
+        cfg      = self.cfg
+        class_id = cfg['class_id']
+        images   = self._images_from_dir(cfg['test_students'][0]['images_dir']) if cfg.get('test_students') else []
+
+        if len(images) < 2:
+            skip('Need at least 2 images for C4')
+            self._log('C4_image_rotation', False, {'skipped': True}); return
+
+        classroom_before = self._get_classroom(class_id)
+        url_before = (classroom_before or {}).get('latestImage')
+
+        resp1 = self._upload_image(class_id, str(images[0]))
+        url_after_1 = (resp1.get('_classroom') or {}).get('latestImage')
+
+        resp2 = self._upload_image(class_id, str(images[1]))
+        url_after_2 = (resp2.get('_classroom') or {}).get('latestImage')
+
+        changed_once  = bool(url_after_1) and url_after_1 != url_before
+        changed_twice = bool(url_after_2) and url_after_2 != url_after_1
+        passed = changed_once and changed_twice
+
+        if passed: ok('latestImage URL changed on every upload')
+        else:      fail('latestImage did not change as expected')
+
+        warn('Deletion of the OLD Cloudinary asset is best-effort (wrapped in a silent '
+             'try/except in upload_image) — this only confirms the URL rotated, not that '
+             'the previous asset was actually removed. Spot-check the Cloudinary console\'s '
+             '"smart_classrooms" folder by hand to confirm images aren\'t piling up unbounded.')
+
+        self._log('C4_image_rotation', passed, {
+            'url_before':  url_before,
+            'url_after_1': url_after_1,
+            'url_after_2': url_after_2,
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST D1 — Occupancy Counting Accuracy Across Conditions
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_d1_occupancy_accuracy(self):
+        head('TEST D1 — Occupancy Counting Accuracy Across Conditions')
+        cfg    = self.cfg
+        trials = cfg.get('occupancy_trials', [])
+
+        if not trials:
+            skip('Add "occupancy_trials" to config to run D1')
+            self._log('D1_occupancy_accuracy', False, {'skipped': True}); return
+
+        class_id = cfg['class_id']
+        errors   = []
+        trial_results = []
+
+        for trial in trials:
+            name       = trial['name']
+            images     = self._images_from_dir(trial['images_dir'])
+            true_count = trial['true_count']
+
+            info(f'\nTrial: {name}  (true count: {true_count})')
+            if not images:
+                warn(f'  No images in {trial["images_dir"]} — skipping trial'); continue
+
+            detected_counts = []
+            for img in images:
+                resp = self._upload_image(class_id, str(img))
+                occ  = (resp.get('_classroom') or {}).get('occupancy')
+                if occ is not None:
+                    detected_counts.append(occ)
+                    info(f'  {img.name}: detected={occ}')
+                time.sleep(0.5)
+
+            if not detected_counts:
+                warn(f'  No valid detections for trial "{name}"'); continue
+
+            avg_detected = statistics.mean(detected_counts)
+            error = avg_detected - true_count
+            errors.append(abs(error))
+
+            info(f'  Avg detected={avg_detected:.2f}  true={true_count}  error={error:+.2f}')
+            trial_results.append({
+                'trial':            name,
+                'true_count':       true_count,
+                'detected_counts':  detected_counts,
+                'avg_detected':     round(avg_detected, 2),
+                'error':            round(error, 2),
+            })
+
+        if not errors:
+            fail('No trials produced results')
+            self._log('D1_occupancy_accuracy', False, {'no_results': True}); return
+
+        mae = statistics.mean(errors)
+        print(f'\n  ── OVERALL ─────────────────────────────')
+        print(f'  Mean Absolute Error: {mae:.2f} people')
+
+        # No official target exists for this in the project docs (unlike B1's
+        # 90%/5% from the original attendance test plan) — 1.0 is a reasonable
+        # starting bar for a single-camera nano-YOLO setup at conf=0.5; adjust
+        # to whatever your report actually commits to.
+        passed = mae <= 1.0
+        if passed: ok(f'D1 within suggested target: MAE={mae:.2f} <= 1.0')
+        else:      warn(f'D1 above suggested target: MAE={mae:.2f} > 1.0')
+
+        self.results['metrics']['D1'] = {'mae': round(mae, 2)}
+        self._log('D1_occupancy_accuracy', passed, {
+            'mae': round(mae, 2),
+            'trials': trial_results,
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST D2 — YOLO Inference Latency
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_d2_inference_latency(self):
+        head('TEST D2 — YOLO Inference Latency')
+        cfg      = self.cfg
+        class_id = cfg['class_id']
+
+        images = []
+        for s in cfg.get('test_students', []):
+            images += self._images_from_dir(s['images_dir'])
+        images = images[:15]
+
+        if not images:
+            skip('No images available for D2')
+            self._log('D2_inference_latency', False, {'skipped': True}); return
+
+        inf_vals  = []
+        per_frame = []
+        for img in images:
+            resp = self._upload_image(class_id, str(img))
+            inf  = resp.get('inference_ms')
+            if inf is not None: inf_vals.append(inf)
+            per_frame.append({'file': Path(img).name, 'inference_ms': inf})
+            info(f'  {Path(img).name}: inference_ms={inf}')
+            time.sleep(0.5)
+
+        if not inf_vals:
+            warn('No inference_ms values returned — check the classroom accepts uploads')
+            self._log('D2_inference_latency', False,
+                      {'reason': 'no timing data', 'per_frame': per_frame}); return
+
+        metrics = {
+            'n':         len(inf_vals),
+            'min_ms':    round(min(inf_vals), 2),
+            'max_ms':    round(max(inf_vals), 2),
+            'avg_ms':    round(statistics.mean(inf_vals), 2),
+            'median_ms': round(statistics.median(inf_vals), 2),
+            'all_ms':    inf_vals,
+        }
+        ok(f'n={metrics["n"]}  min={metrics["min_ms"]}  '
+           f'avg={metrics["avg_ms"]}  max={metrics["max_ms"]} ms')
+
+        self.results['metrics']['D2'] = metrics
+        self._log('D2_inference_latency', True, {**metrics, 'per_frame': per_frame})
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TEST D3 — End-to-End Occupancy Update Latency (WebSocket-confirmed)
+    # ═══════════════════════════════════════════════════════════════════════
+    def test_d3_e2e_occupancy_latency(self):
+        head('TEST D3 — End-to-End Occupancy Update Latency')
+        cfg      = self.cfg
+        class_id = cfg['class_id']
+
+        images = []
+        for s in cfg.get('test_students', []):
+            images += self._images_from_dir(s['images_dir'])
+        images = images[:5]
+
+        if not images:
+            skip('No images for D3')
+            self._log('D3_e2e_occupancy_latency', False, {'skipped': True}); return
+
+        e2e_vals = []
+        for i, img in enumerate(images):
+            result = asyncio.run(self._upload_and_wait_for_broadcast(class_id, str(img)))
+            latency = result.get('latency_ms')
+            if result.get('ws_error'):
+                warn(f'  Trial {i+1}: WebSocket error — {result["ws_error"]}')
+            elif latency is not None:
+                e2e_vals.append(latency)
+                ok(f'  Trial {i+1}: {latency:.0f} ms')
+            else:
+                warn(f'  Trial {i+1}: no broadcast received within 10 s')
+
+        if not e2e_vals:
+            fail('No successful measurements')
+            self._log('D3_e2e_occupancy_latency', False, {'no_measurements': True}); return
+
+        metrics = {
+            'n':         len(e2e_vals),
+            'min_ms':    min(e2e_vals),
+            'max_ms':    max(e2e_vals),
+            'avg_ms':    round(statistics.mean(e2e_vals), 2),
+            'median_ms': round(statistics.median(e2e_vals), 2),
+            'all_ms':    e2e_vals,
+        }
+        ok(f'avg={metrics["avg_ms"]} ms  max={metrics["max_ms"]} ms  (target < 5000 ms)')
+
+        passed = metrics['avg_ms'] < 5000
+        self.results['metrics']['D3'] = metrics
+        self._log('D3_e2e_occupancy_latency', passed, metrics)
+
+    # ═══════════════════════════════════════════════════════════════════════
     # Save outputs
     # ═══════════════════════════════════════════════════════════════════════
     def save_results(self):
@@ -722,14 +1106,14 @@ class ChakamTestRunner:
         # ── 3. Human-readable report ────────────────────────────────────────
         m = self.results.get('metrics', {})
         lines = [
-            'CHAKAM ATTENDANCE MODE — TEST REPORT',
+            'CHAKAM TEST REPORT — ATTENDANCE MODE + OCCUPANCY MODE',
             '=' * 60,
             f'Session : {self.results["session"]["label"]}',
             f'Started : {self.results["session"]["started_at"]}',
             f'Ended   : {self.results["session"]["ended_at"]}',
             f'API     : {self.base}',
             '',
-            'FUNCTIONAL TESTS',
+            'ALL TESTS',
             '-' * 40,
         ]
         for name, data in self.results['tests'].items():
@@ -751,9 +1135,21 @@ class ChakamTestRunner:
             b = m['B3']
             lines.append(f'  E2E latency (n={b["n"]}): '
                          f'avg={b["avg_ms"]}  max={b["max_ms"]} ms')
+        if 'D1' in m:
+            lines.append(f'  Occupancy MAE         : {m["D1"]["mae"]} people')
+        if 'D2' in m:
+            b = m['D2']
+            lines.append(f'  YOLO inference (n={b["n"]}): '
+                         f'min={b["min_ms"]}  avg={b["avg_ms"]}  '
+                         f'max={b["max_ms"]} ms')
+        if 'D3' in m:
+            b = m['D3']
+            lines.append(f'  Occupancy E2E (n={b["n"]}): '
+                         f'avg={b["avg_ms"]}  max={b["max_ms"]} ms')
         lines.append('')
-        lines.append('NOTE: A3 (export) always shows SKIP — it is verified manually via')
-        lines.append('the dashboard UI, not scripted. See the module docstring for why.')
+        lines.append('NOTE: A3 (export) and C2 (capacity alert) always show SKIP — both')
+        lines.append('are verified manually (browser export buttons / ALERT_EMAIL inbox),')
+        lines.append('not scripted. See the module docstring for why.')
         lines.append('')
 
         rpt_path = self.out_dir / 'report.txt'
@@ -770,19 +1166,20 @@ class ChakamTestRunner:
 # ═══════════════════════════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser(
-        description='Chakam Attendance Mode Test Runner',
+        description='Chakam Test Runner — Attendance Mode (A/B) + Occupancy Mode (C/D)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python chakam_attendance_test.py --config config.json
   python chakam_attendance_test.py --config config.json --test b1
   python chakam_attendance_test.py --config config.json --test a3
+  python chakam_attendance_test.py --config config.json --test c1
         """
     )
     parser.add_argument('--config', default='config.json',
                         help='Path to config JSON (default: config.json)')
     parser.add_argument('--test',   default='all',
-        choices=['all','a1','a2','a3','a4','b1','b2','b3'],
+        choices=['all','a1','a2','a3','a4','b1','b2','b3','c1','c2','c3','c4','d1','d2','d3'],
         help='Which test to run (default: all)')
     args = parser.parse_args()
 
@@ -805,6 +1202,13 @@ Examples:
         'b1': runner.test_b1_recognition_accuracy,
         'b2': runner.test_b2_fr_latency,
         'b3': runner.test_b3_e2e_latency,
+        'c1': runner.test_c1_occupancy_cap,
+        'c2': runner.test_c2_capacity_alert,
+        'c3': runner.test_c3_ws_broadcast,
+        'c4': runner.test_c4_image_rotation,
+        'd1': runner.test_d1_occupancy_accuracy,
+        'd2': runner.test_d2_inference_latency,
+        'd3': runner.test_d3_e2e_occupancy_latency,
     }
 
     if args.test == 'all':

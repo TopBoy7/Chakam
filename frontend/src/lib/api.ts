@@ -30,7 +30,12 @@ async function throwOnError(res: Response): Promise<Response> {
     if (res.status === 401) {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
       if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        // Preserve where the user was — including any in-progress form page
+        // like /register/:token — so re-verifying brings them back here
+        // instead of stranding them on a bare dashboard with no explanation.
+        const destination = window.location.pathname + window.location.search;
+        window.location.href =
+          `/login?redirect=${encodeURIComponent(destination)}&reason=session_expired`;
       }
     }
     let detail = `HTTP ${res.status}`;

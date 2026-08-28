@@ -56,5 +56,32 @@
       "ground_truth_present": ["190408001", "190408002"],
       "unregistered_present": ["UNREGISTERED_PERSON_ID"]
     }
+  ],
+
+  "_comment6": "OCCUPANCY MODE (tests C1/C2, D1) — used for /classrooms/{classId}/image people-counting, separate from face recognition above. occupancy_over_capacity_dir needs a frame showing MORE people than the classroom's real capacity — with only a handful of test people, temporarily lower the classroom's capacity via Edit Classroom in the dashboard (then restore it afterward) rather than trying to gather dozens of people. occupancy_under_capacity_dir is optional, used only by C2 to also confirm no alert fires when under capacity.",
+  "occupancy_over_capacity_dir":  "./test_images/occupancy/over_capacity",
+  "occupancy_under_capacity_dir": "./test_images/occupancy/under_capacity",
+
+  "_comment7": [
+    "For D1 accuracy testing — one entry per trial, same live-capture workflow as recognition_trials.",
+    "true_count: the actual number of people physically in frame when the images were captured — count them yourself at capture time, this is your ground truth.",
+    "Vary density/distance/occlusion between trials, same as B1's lighting/distance variation."
+  ],
+  "occupancy_trials": [
+    {
+      "name":       "Trial 1 — low density, unobstructed",
+      "images_dir": "./test_images/occupancy/trial_1",
+      "true_count": 2
+    },
+    {
+      "name":       "Trial 2 — moderate density",
+      "images_dir": "./test_images/occupancy/trial_2",
+      "true_count": 5
+    },
+    {
+      "name":       "Trial 3 — higher density, some occlusion",
+      "images_dir": "./test_images/occupancy/trial_3",
+      "true_count": 8
+    }
   ]
 }
