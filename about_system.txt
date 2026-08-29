@@ -1365,6 +1365,31 @@ CAMERAS / IoT DEVICES
   D1) while they're in position; each saved frame is genuinely what the
   device captured, not a stand-in.
 
+- TESTING METHODOLOGY, finalized (2026-08-29), not yet executed as of this
+  note — B1 and D1 will use SEMI-AUTOMATED FIELD TESTING, not static/stock
+  photos. Two distinct phases:
+    1. Field capture (manual/live) — the real device, in the real
+       classroom, with real test subjects physically present. --capture
+       listens on the live WebSocket and saves each genuine frame the
+       device sends as it arrives (see the note above for why this is the
+       only reliable way to do this, given the backend keeps only a single
+       latestImage per classroom). A human has to be there to position
+       subjects and know the true headcount/attendee list — this part is
+       not automatable.
+    2. Analysis (scripted) — --test b1 / --test d1 replay the captured
+       frames and compute TP/FP/FN or MAE against ground truth recorded in
+       config.json, with structured output to results.json/summary.csv/
+       report.txt. This part requires no human judgement per-frame.
+  Rejected alternative: purely static/stock photos (what was originally
+  used for the C1/C2/D1 dry run in the "FIRST LIVE FUNCTIONAL TEST RUN"
+  note below) — works mechanically (same upload endpoint either way) but
+  isn't representative of real camera performance at real distance/angle/
+  lighting, which is the actual thing B1/D1 are meant to measure.
+  Status: plan finalized, live session not yet run. conf=0.25 (see the
+  YOLO tuning note above) should be validated during this same live
+  session — a lone-person capture and a moderate/dense-crowd capture would
+  both usefully double as informal conf validation, not just B1/D1 data.
+
 - FIRST LIVE FUNCTIONAL TEST RUN (2026-08-29) — A1/A2/A3/A4/C1/C2/C3/C4 run
   for real against the live system (chakam-api.duckdns.org, COMP-LAB /
   CSC101, 3 registered test students). Results: A1 PASS (both auto-mark
