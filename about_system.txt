@@ -3,7 +3,7 @@
   TECHNICAL OVERVIEW & ARCHITECTURE DOCUMENT
 ================================================================================
 
-  Last updated: 2026-08-28
+  Last updated: 2026-08-29
 
 
 ================================================================================
@@ -1188,11 +1188,40 @@ CAMERAS / IoT DEVICES
   no sessions will see a not-found error rather than an empty results page.
 
 - YOLOv8 nano (yolov8n.pt) is the smallest and fastest YOLO variant. It trades
-  some accuracy for speed. The confidence threshold was raised from 0.25 to
-  0.5 after live testing showed a single person being over-counted (see
-  section 6) — this has not yet been re-validated against a live camera feed,
-  and yolov8s.pt (small) or yolov8m.pt (medium) remain options if 0.5 still
-  isn't accurate enough, at the cost of higher inference time.
+  some accuracy for speed. Confidence threshold history, now backed by git
+  history rather than just prose:
+    - 2025-11-27 (first backend commit): conf=0.25, iou=0.45, augment=True —
+      all three chosen together and commented deliberately ("sensitive to
+      small objects" / "keeps tiny detections" / "improves accuracy
+      significantly"). Ran unchanged for ~9 months.
+    - 2026-08-19, commit 7321a08d "count fix" (10 days before this session):
+      conf raised to 0.5 AND augment=True removed, in the SAME commit. The
+      commit's own comment blames a single person reading as 2-4 on BOTH
+      together, specifically calling out augment's multi-scale merging as
+      the amplifying factor — but neither variable was tested in isolation
+      before both were changed at once. This is a confounded fix: it's not
+      actually known whether conf, augment, or their interaction was the
+      real cause.
+    - 2026-08-29 (this session): briefly tried conf=0.4 as a compromise
+      between 0.5's confirmed dense-crowd under-count (~20 detected on a
+      ~100-person photo, see the "FIRST LIVE FUNCTIONAL TEST RUN" note) and
+      0.25's original over-count report — then reverted to conf=0.25,
+      augment left OFF, after checking the git history above. Reasoning:
+      since the "count fix" commit's own comment points at augment as the
+      amplifier, and augment is already off, 0.25-without-augment is a
+      genuinely different, untested configuration from whatever the
+      original bug report was describing — not a blind revert.
+  STATUS: NOT YET VALIDATED either way. This needs real confirmation during
+  live testing: a lone person in frame should read as 1, not 2-4 (if the
+  over-count comes back, augment was not the real cause, and this should
+  move toward yolov8s.pt/yolov8m.pt rather than continuing to tune conf) —
+  and the dense-crowd case should be re-checked too, since 0.25 might now
+  swing back to over-counting there instead.
+  IMPORTANT: this line lives in main.py (the heavy backend) — like every
+  other change in this file, it does nothing on the live system until the
+  heavy backend is redeployed again (see section 12 and the "why did this
+  even happen" JWT/redeploy incident above — the same manual-redeploy gap
+  applies here).
 
 - The face recognition matching threshold is hardcoded at 0.55. This works
   well in controlled classroom settings. Environments with varied lighting or
@@ -1317,6 +1346,83 @@ CAMERAS / IoT DEVICES
   file forward doesn't get audited by anything; worth a final read-through
   of config.json against test_students before a real test run.
 
+- Added `--capture` mode to chakam_attendance_test.py (2026-08-29) — for
+  collecting REAL frames from the physical device during a live B1/D1
+  trial, not substitute photos. The obstacle: upload_image (main.py)
+  keeps only a single latestImage per classroom — every new upload deletes
+  the PREVIOUS one from Cloudinary immediately, so there is no way to
+  retroactively pull multiple frames for a trial out of Cloudinary
+  afterward; only the very last one would still exist by the time the
+  trial ends. `--capture OUT_DIR` works around this correctly rather than
+  routing around it with non-device photos: it opens the same
+  authenticated `/ws` connection C3/D3 use, listens for
+  classroom_image_update broadcasts matching the configured class_id, and
+  downloads each frame's URL to OUT_DIR the moment it's announced — before
+  the next upload deletes it. Runs until Ctrl+C, or `--capture-duration
+  <seconds>` for an auto-stop. Usage during a live trial: point the real
+  camera at the seated test subjects, then run e.g.
+  `--capture test_images/trials/trial_1` (or a occupancy/trial_N dir for
+  D1) while they're in position; each saved frame is genuinely what the
+  device captured, not a stand-in.
+
+- FIRST LIVE FUNCTIONAL TEST RUN (2026-08-29) — A1/A2/A3/A4/C1/C2/C3/C4 run
+  for real against the live system (chakam-api.duckdns.org, COMP-LAB /
+  CSC101, 3 registered test students). Results: A1 PASS (both auto-mark
+  and the override-persistence fix — this is the first live confirmation
+  the manual-override-to-absent bug fix from earlier in this session
+  actually holds outside a code read), A3 SKIP (manual, by design), A4
+  PASS, C1 PASS (occupancy correctly capped at 20 against a capacity of
+  50 — worth noting the actual YOLO-detected count on a densely packed
+  ~100-person stock photo was only ~20, i.e. heavy under-counting at high
+  crowd density/occlusion — a real data point for the report's discussion
+  of YOLO accuracy limits, not a test-harness artifact), C2 SKIP (manual,
+  by design — alert email triggered, confirm delivery by hand), C3 PASS,
+  C4 PASS.
+
+  A2 (biometric erasure) FAILED with 403 "not permitted" — but this is a
+  credentials issue with the test run, not a system bug. DELETE
+  /students/{matric}/embeddings requires require_self_or_admin: the
+  student themself, or an admin — a lecturer account (which is all
+  config.json's lecturer_email provides) is neither, so the 403 is the
+  ACCESS CONTROL WORKING CORRECTLY, not a defect. A lecturer cannot
+  unilaterally erase a student's biometric data — only the student
+  themselves (via the real "My Attendance" self-service flow) or an admin
+  can. To actually exercise A2 end-to-end, config.json needs an admin
+  account's email in lecturer_email (admin bypasses course-ownership
+  checks entirely — see auth.assert_course_access — so an admin account
+  can run every other test too, making it the more capable choice for
+  config.json generally, not just for A2).
+
+  Three real bugs in chakam_attendance_test.py itself were found and
+  fixed by this live run, all encoding-related and all Windows-specific
+  (none of this would necessarily surface on macOS/Linux, where the
+  default filesystem/locale encoding is already UTF-8):
+    1. _images_from_dir only globbed .jpg/.jpeg/.png — two of the
+       occupancy test images the user provided were .webp, so C1 and C2
+       silently reported "no images" even though real files were sitting
+       right there. Fixed: added .webp to the glob.
+    2. save_results() wrote report.txt, results.json, and summary.csv via
+       write_text()/open() with no explicit encoding — on Windows this
+       defaults to the system codepage (cp1252), which can't represent
+       the script's own ✓/✗ output symbols. Every run crashed at the very
+       end, after all tests had already completed, discarding the human-
+       readable report (results.json/summary.csv survived only because
+       they happened not to contain any non-cp1252 character in that
+       particular run — this was luck, not a working code path). Fixed:
+       explicit encoding='utf-8' on all three writes.
+    3. ChakamTestRunner.__init__ read config.json via plain open() with
+       no encoding either — config.json is UTF-8 and contains an em-dash
+       in session_label, which got silently mangled into "â€”" (classic
+       UTF-8-read-as-cp1252 mojibake) rather than erroring, corrupting
+       every saved report's session label. Fixed: explicit
+       encoding='utf-8' on the config read too.
+  General lesson: any file this script reads or writes now has an
+  explicit encoding='utf-8' — relying on Python's platform-default
+  encoding is not safe on Windows the moment content is non-ASCII, and
+  the failure mode ranges from "crashes after all the real work is done"
+  to "silently corrupts data with no error at all," neither of which is
+  obvious from the terminal output alone.
+
 - Diagnosed (2026-08-28) why a live registration attempt failed with
   "Field required; Field required": fetched the OpenAPI schema directly
   from both live backends (GET /openapi.json) and compared against this
@@ -1340,5 +1446,77 @@ CAMERAS / IoT DEVICES
   the repo fails live, check whether IT'S the heavy backend involved
   (registration, image upload) before assuming the bug is in new code —
   the manual-redeploy gap is a standing trap, not a one-time issue.
+
+- RESOLVED (2026-08-29) — full registration outage, four separate causes
+  stacked on top of each other. Documenting the whole sequence here since
+  it's a real multi-layered incident, useful as-is for a report's testing/
+  challenges section:
+
+  1. Stale heavy backend code (above) — the pre-existing matricNumber/
+     fullName requirement. Fixed by redeploying the heavy backend with
+     current code. Verified via GET /openapi.json before and after.
+
+  2. New problem surfaced BY that redeploy: JWT_SECRET mismatch between
+     the light backend (Render) and the heavy backend (AWS/DuckDNS) — two
+     separate deployments, two separately-configured copies of the same
+     secret. Evidence this was NEW, not pre-existing: the earlier failure
+     (cause 1) was a 422 on missing form fields, which only happens if the
+     token passed the auth check first — meaning the secrets matched
+     before the redeploy. Immediately after, the same kind of request
+     failed with 401 at the exact point it reached the heavy backend,
+     while everything that stayed on the light backend kept working fine.
+     That pattern (works on light-only calls, fails instantly the moment a
+     request crosses to heavy) is what pointed at the secret specifically,
+     not a real token expiry (which would be slow, not instant, and would
+     fail everywhere, not just on the one hop). Root cause: the manual
+     redeploy process used for the heavy backend evidently didn't carry
+     over the original .env — it came back up with a different
+     JWT_SECRET than it had five minutes earlier. Fixed by copying the
+     light backend's JWT_SECRET value onto the heavy backend and
+     restarting it.
+
+  3. Separately found while investigating: the light backend's own
+     HEAVY_BACKEND_URL environment variable was pointing at the wrong
+     address entirely. Corrected independently of (2).
+
+  4. Even with (1)-(3) fixed, real registration submissions (genuine
+     token, genuine photos) still failed — this time with "invalid
+     response from analytics server", the light backend's fallback text
+     for when it gets back a response it can't parse as JSON. Confirmed
+     via direct testing that this is NOT the same failure mode as a
+     timeout (a timeout is caught separately and surfaces as a clean 503
+     "face recognition service currently unavailable") and NOT a
+     connectivity/URL problem (a direct POST to the corrected heavy
+     backend URL, with deliberately bad auth, returned a clean, well-
+     formed 401 — proving the server itself is reachable and functioning
+     for anything that doesn't reach the real face-processing code). That
+     leaves the actual face-embedding extraction step (decoding 5 real
+     photos through face_recognition/dlib) as the most likely site of the
+     failure — either a crash partway through, or a reverse proxy/load
+     balancer in front of the heavy backend giving up and returning an
+     empty response before that processing finishes. This could not be
+     confirmed further without server-side log access, which wasn't
+     available during this session.
+
+  RESOLUTION: rather than keep chasing (4) blind, the frontend
+  (VITE_API_BASE_URL / VITE_WS_URL on Vercel) was pointed directly at the
+  heavy backend, bypassing the light backend's proxy hop for registration
+  entirely. Confirmed safe to do — the heavy backend already has
+  permissive CORS (allow_origins=["*"] in main.py) and implements the same
+  /ws WebSocket handshake as the light backend. Registration now works
+  end-to-end; test students have been successfully registered live.
+
+  STANDING CONSEQUENCE: the frontend currently talks to the heavy backend
+  for everything, not just registration — a bigger topology change than
+  originally intended (see section 2's deployment topology, which assumes
+  the frontend talks to the light backend). The specific bug in (4), on
+  the light→heavy proxy path, remains unresolved and unexplained. If the
+  frontend is ever pointed back at the light backend, registration should
+  be re-tested before assuming it still works — the underlying cause
+  there was never actually found, only routed around.
+
+  chakam_attendance_test.py's config.json was updated to match —
+  api_base_url now also points at chakam-api.duckdns.org, so test results
+  reflect the same backend real users are actually hitting.
 
 ================================================================================

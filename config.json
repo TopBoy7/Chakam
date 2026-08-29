@@ -1,7 +1,7 @@
 {
 
   "session_label": "Attendance Mode Test — Intro to Computing, CSC 101  |  2026-08-28",
-  "api_base_url":  "https://chakam-backend.onrender.com",
+  "api_base_url":  "https://chakam-api.duckdns.org",
   "lecturer_email":"josephdossantos7@gmail.com",
   "output_dir":    "./test_results",
 

@@ -68,7 +68,7 @@ class ChakamTestRunner:
     """Runs functional and quantitative tests against the live Chakam backend."""
 
     def __init__(self, config_path: str):
-        with open(config_path) as f:
+        with open(config_path, encoding='utf-8') as f:
             self.cfg = json.load(f)
 
         self.base      = self.cfg['api_base_url'].rstrip('/')
@@ -213,6 +213,70 @@ class ChakamTestRunner:
             result['ws_error'] = str(e)
         return result
 
+    async def capture_live_frames(
+        self, class_id: str, out_dir: Path, duration: Optional[float] = None
+    ) -> int:
+        """Listen on the WebSocket for real classroom_image_update broadcasts
+        from the actual device and save each one to out_dir as it arrives.
+
+        This exists because the backend keeps only the SINGLE most recent
+        image per classroom — every new upload deletes the previous one from
+        Cloudinary immediately (see upload_image in main.py). There is no way
+        to retroactively collect multiple frames from a live session by
+        checking Cloudinary afterward; only the last frame would still exist.
+        The WebSocket broadcast fires with the fresh URL before the NEXT
+        upload replaces it, so downloading immediately on receipt is the only
+        reliable way to capture more than one real frame from a live session.
+
+        Runs until Ctrl+C, or until `duration` seconds have elapsed if given.
+        Returns the number of frames saved."""
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        start = time.time()
+
+        import websockets
+        async with websockets.connect(self._ws_url()) as ws:
+            await ws.send(json.dumps({'token': self.token}))
+            info(f'Listening for real frames from {class_id} — Ctrl+C to stop'
+                 + (f' (auto-stop after {duration:.0f}s)' if duration else ''))
+            while True:
+                if duration and (time.time() - start) > duration:
+                    break
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    continue
+                try:
+                    msg = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if msg.get('event') not in ('classroom_image_update', 'classroom_updated'):
+                    continue
+                classroom = msg.get('classroom') or {}
+                if classroom.get('classId') != class_id:
+                    continue
+                url = classroom.get('latestImage')
+                if not url:
+                    continue
+
+                # Download NOW — the previous frame was just deleted from
+                # Cloudinary the moment this one arrived, and this one will be
+                # deleted the moment the next frame arrives. No time to wait.
+                try:
+                    r = requests.get(url, timeout=10)
+                    r.raise_for_status()
+                except requests.RequestException as e:
+                    warn(f'Failed to download frame: {e}'); continue
+
+                saved += 1
+                ts = datetime.datetime.now().strftime('%H%M%S')
+                fname = out_dir / f'frame_{saved:03d}_{ts}.jpg'
+                fname.write_bytes(r.content)
+                ok(f'Saved {fname.name}  (occupancy at capture: {classroom.get("occupancy")})')
+
+        info(f'Done — {saved} frame(s) saved to {out_dir}')
+        return saved
+
     def _get_attendees(self, session_id: str) -> List[dict]:
         """Return the attendees list for a session, unwrapped.
         Each entry now includes a real 'present' bool — a manual 'absent'
@@ -266,14 +330,13 @@ class ChakamTestRunner:
         return None
 
     def _images_from_dir(self, directory: str) -> List[Path]:
-        """Return sorted list of .jpg/.jpeg/.png files in a directory."""
+        """Return sorted list of .jpg/.jpeg/.png/.webp files in a directory."""
         d = Path(directory)
         if not d.exists():
             warn(f'Directory not found: {directory}')
             return []
-        return sorted(
-            list(d.glob('*.jpg')) + list(d.glob('*.jpeg')) + list(d.glob('*.png'))
-        )
+        exts = ('*.jpg', '*.jpeg', '*.png', '*.webp')
+        return sorted(f for ext in exts for f in d.glob(ext))
 
     def _log(self, name: str, passed: bool, details: dict):
         self.results['tests'][name] = {
@@ -1085,7 +1148,7 @@ class ChakamTestRunner:
 
         # ── 1. Full JSON ────────────────────────────────────────────────────
         json_path = self.out_dir / 'results.json'
-        json_path.write_text(json.dumps(self.results, indent=2, default=str))
+        json_path.write_text(json.dumps(self.results, indent=2, default=str), encoding='utf-8')
 
         # ── 2. CSV summary ──────────────────────────────────────────────────
         csv_path = self.out_dir / 'summary.csv'
@@ -1099,7 +1162,7 @@ class ChakamTestRunner:
                 'timestamp': data.get('timestamp', ''),
                 'notes':     data.get('reason', data.get('error', '')),
             })
-        with open(csv_path, 'w', newline='') as f:
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             w = csv.DictWriter(f, fieldnames=['test', 'status', 'timestamp', 'notes'])
             w.writeheader(); w.writerows(rows)
 
@@ -1153,7 +1216,7 @@ class ChakamTestRunner:
         lines.append('')
 
         rpt_path = self.out_dir / 'report.txt'
-        rpt_path.write_text('\n'.join(lines))
+        rpt_path.write_text('\n'.join(lines), encoding='utf-8')
 
         # ── Print summary ───────────────────────────────────────────────────
         print('\n' + '\n'.join(lines))
@@ -1174,6 +1237,8 @@ Examples:
   python chakam_attendance_test.py --config config.json --test b1
   python chakam_attendance_test.py --config config.json --test a3
   python chakam_attendance_test.py --config config.json --test c1
+  python chakam_attendance_test.py --config config.json --capture test_images/trials/trial_1
+  python chakam_attendance_test.py --config config.json --capture test_images/occupancy/trial_2 --capture-duration 30
         """
     )
     parser.add_argument('--config', default='config.json',
@@ -1181,6 +1246,17 @@ Examples:
     parser.add_argument('--test',   default='all',
         choices=['all','a1','a2','a3','a4','b1','b2','b3','c1','c2','c3','c4','d1','d2','d3'],
         help='Which test to run (default: all)')
+    parser.add_argument('--capture', metavar='OUT_DIR', default=None,
+        help='Instead of running tests, listen live on the WebSocket and save '
+             'every real frame the device sends to OUT_DIR as it arrives '
+             '(Ctrl+C to stop). Use this to collect real camera frames for a '
+             'B1/D1 trial while people are physically in the room — the '
+             'backend only ever keeps the single latest image, so this is the '
+             'only reliable way to capture more than one frame from a live '
+             'session.')
+    parser.add_argument('--capture-duration', type=float, default=None,
+        help='With --capture: auto-stop after this many seconds instead of '
+             'waiting for Ctrl+C.')
     args = parser.parse_args()
 
     if not Path(args.config).exists():
@@ -1193,6 +1269,19 @@ Examples:
     # Auth
     if not runner.authenticate(runner.cfg['lecturer_email'], 'Lecturer'):
         sys.exit(1)
+
+    if args.capture:
+        out_dir = Path(args.capture)
+        try:
+            saved = asyncio.run(
+                runner.capture_live_frames(runner.cfg['class_id'], out_dir, args.capture_duration)
+            )
+        except KeyboardInterrupt:
+            print('\nCapture stopped.')
+            saved = None
+        if saved is not None:
+            print(f'\n{saved} frame(s) saved to {out_dir}')
+        return
 
     test_map = {
         'a1': runner.test_a1_manual_override,

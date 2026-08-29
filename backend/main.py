@@ -394,15 +394,21 @@ async def upload_image(
         app.state.yolo_model = model
 
     # Run YOLO in executor
-    # conf=0.5 (was 0.25) and augment off — at 0.25 the nano model was counting
-    # low-confidence partial detections (limbs, background clutter) as extra
-    # people; a single person in frame was reading as 2-4. augment=True's
-    # multi-scale merging made this worse, letting one person generate
-    # several overlapping low-confidence boxes NMS didn't fully collapse.
+    # conf history: 0.25+augment=True (original, 9 months stable) -> 0.5,
+    # augment removed (2026-08-19 "count fix" — blamed a single person reading
+    # as 2-4 on both changed at once) -> back to 0.25 (2026-08-29), augment
+    # STILL OFF. This is a different, narrower experiment than the original
+    # 0.25: the "count fix" commit's own reasoning pointed at augment=True's
+    # multi-scale merging as the amplifying cause, not conf alone, and augment
+    # was never re-tested independently before conf got raised alongside it.
+    # NOT YET RE-VALIDATED — confirm during live testing that a lone person
+    # still reads as 1 (not 2-4) with augment off at this threshold; if the
+    # over-count comes back, augment was not actually the cause and this
+    # should move toward yolov8s.pt instead of chasing conf further.
     t_infer_start = time.perf_counter()
     results = await loop.run_in_executor(
         None,
-        lambda: model.predict(img, imgsz=1920, conf=0.5, iou=0.45)
+        lambda: model.predict(img, imgsz=1920, conf=0.25, iou=0.45)
     )
     inference_ms = (time.perf_counter() - t_infer_start) * 1000
 
