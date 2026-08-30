@@ -1211,12 +1211,29 @@ CAMERAS / IoT DEVICES
       amplifier, and augment is already off, 0.25-without-augment is a
       genuinely different, untested configuration from whatever the
       original bug report was describing — not a blind revert.
-  STATUS: NOT YET VALIDATED either way. This needs real confirmation during
-  live testing: a lone person in frame should read as 1, not 2-4 (if the
-  over-count comes back, augment was not the real cause, and this should
-  move toward yolov8s.pt/yolov8m.pt rather than continuing to tune conf) —
-  and the dense-crowd case should be re-checked too, since 0.25 might now
-  swing back to over-counting there instead.
+    - 2026-08-30: the 0.25-without-augment hypothesis got an actual live
+      test — real phone-captured frames (via camera_simulator.html and
+      --capture, see test_images/_pending_capture*/) with people physically
+      in the room, not a stock photo. Result: still under-counting.
+      Multiple real frames with 3-7 people clearly visible read as 0-4.
+      0.25-without-augment did not clearly fix the under-count problem, so
+      it isn't a validated improvement over 0.5 — reverted BACK to conf=0.5
+      on that basis (augment remains off). This doesn't prove augment was
+      never part of the original over-count story, only that removing conf
+      to 0.25 alone doesn't buy back the accuracy that seemed to disappear
+      — 0.5 is at least the value C1 confirmed doesn't reintroduce the
+      original single-person 2-4 over-count.
+  STATUS: conf=0.5, augment=off is the current live-tested best guess, not
+  a settled answer. Across this session's live captures, EVERY threshold
+  tried (0.5 on a dense stock photo, 0.25 on real people) has shown
+  meaningful under-counting relative to eyeballed ground truth. That
+  pattern — poor counts across a wide conf range, not just at one bad
+  setting — points more toward the hardware finding below (weak OV2640
+  sensor/lens, see the HARDWARE FINDING note) or the camera_simulator.html
+  workaround as the actual fix, rather than continuing to hunt for a
+  better conf value on the same nano model + weak source images. If
+  camera_simulator.html captures (better optics) still under-count at
+  conf=0.5, that's strong evidence the bottleneck was never conf at all.
   IMPORTANT: this line lives in main.py (the heavy backend) — like every
   other change in this file, it does nothing on the live system until the
   heavy backend is redeployed again (see section 12 and the "why did this
@@ -1389,6 +1406,53 @@ CAMERAS / IoT DEVICES
   YOLO tuning note above) should be validated during this same live
   session — a lone-person capture and a moderate/dense-crowd capture would
   both usefully double as informal conf validation, not just B1/D1 data.
+
+- HARDWARE FINDING (2026-08-30) — the physical ESP32 camera's image quality
+  is genuinely limiting results, confirmed by --capture during a real test
+  run: significant blur, consistent under-counting even in ordinary rooms
+  (not just the earlier dense stock photo — e.g. one real indoor capture
+  showed 3-4 people in frame but occupancy read 1), and face recognition
+  for attendance only working when the device is held very close to a
+  face. Root cause identified from firmware/CameraConfig.h and
+  firmware.ino: the device's pin-mapping helper is named
+  esp32S3WroomOV5640Pins(), but the camera is constructed with
+  SensorModel::OV2640 as the expected/validated sensor — and since the
+  device successfully initialises (validateSensorModel() would fail
+  camera.begin() otherwise), the physically populated sensor is
+  confirmed to actually be an OV2640, a common budget module frequently
+  paired with a short, sometimes fixed-focus lens. That lens
+  characteristic — sharp close, blurry at any real distance — matches the
+  "have to hold it right up to their face" symptom exactly. Actual
+  in-use capture settings (setNormalCameraProfile(): FRAMESIZE_SVGA
+  800x600, JPEG quality 12) are reasonable for what the sensor can do —
+  this is not a software setting quietly crippling image quality, the
+  ceiling is the sensor/lens itself. (The separate FRAMESIZE_QVGA/quality
+  25 profile in setApStreamCameraProfile() is only for the local AP
+  live-preview stream, not the uploads YOLO/face_recognition actually
+  process — not the cause.) Not yet checked: whether this specific
+  module's lens has a manually-rotatable focus ring (some OV2640 boards
+  do) — worth a two-minute physical check before treating this as a hard
+  ceiling.
+
+- Added camera_simulator.html at the repo root (2026-08-30) — works
+  around the hardware finding above rather than waiting on a lens fix or
+  hardware swap. A single self-contained HTML/JS page (no build step, no
+  dependencies) that uses the browser's own camera (laptop webcam or,
+  better, a phone's camera via a local HTTPS tunnel — phone cameras
+  generally have real autofocus the ESP32 module lacks) and POSTs frames
+  to the exact same POST /classrooms/{classId}/image endpoint the real
+  device uses. This endpoint has no auth dependency and CORS is already
+  wide open (allow_origins=["*"] in main.py), so a plain browser fetch()
+  works with zero backend changes. Config (API base URL / class_id /
+  device_id) is editable in the page and persisted via localStorage.
+  Supports one-off capture or an auto-capture loop on a configurable
+  interval (default 3s, matching the real device's cadence) — meaning it
+  composes with --capture exactly like the real hardware would, just
+  with better source image quality. Must be served (e.g. `python -m
+  http.server`), not opened as a bare file:// page — getUserMedia
+  requires a secure context, which file:// and plain http:// over a LAN
+  IP do not satisfy; localhost is fine, a phone needs an HTTPS tunnel
+  (e.g. ngrok) to reach a laptop-hosted instance securely.
 
 - FIRST LIVE FUNCTIONAL TEST RUN (2026-08-29) — A1/A2/A3/A4/C1/C2/C3/C4 run
   for real against the live system (chakam-api.duckdns.org, COMP-LAB /

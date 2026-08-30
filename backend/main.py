@@ -395,20 +395,21 @@ async def upload_image(
 
     # Run YOLO in executor
     # conf history: 0.25+augment=True (original, 9 months stable) -> 0.5,
-    # augment removed (2026-08-19 "count fix" — blamed a single person reading
-    # as 2-4 on both changed at once) -> back to 0.25 (2026-08-29), augment
-    # STILL OFF. This is a different, narrower experiment than the original
-    # 0.25: the "count fix" commit's own reasoning pointed at augment=True's
-    # multi-scale merging as the amplifying cause, not conf alone, and augment
-    # was never re-tested independently before conf got raised alongside it.
-    # NOT YET RE-VALIDATED — confirm during live testing that a lone person
-    # still reads as 1 (not 2-4) with augment off at this threshold; if the
-    # over-count comes back, augment was not actually the cause and this
-    # should move toward yolov8s.pt instead of chasing conf further.
+    # augment removed (2026-08-19 "count fix") -> 0.25, augment still off
+    # (2026-08-29, hypothesis: augment was the real cause, not conf) -> back
+    # to 0.5 (2026-08-30), augment still off. The 0.25-without-augment
+    # hypothesis was tested live with real people in frame (see
+    # test_images/_pending_capture*/ and the "FIRST LIVE FUNCTIONAL TEST RUN"
+    # / hardware-finding notes) and did NOT clearly fix under-counting —
+    # multiple real captures with 3-7 people visible still read as 0-4. That
+    # doesn't rule augment back in as the sole cause, but it means
+    # 0.25-without-augment isn't a proven win either, and 0.5 is the value
+    # actually validated (via C1) not to reintroduce the original single-
+    # person 2-4 over-count. Reverted on that basis. augment stays off.
     t_infer_start = time.perf_counter()
     results = await loop.run_in_executor(
         None,
-        lambda: model.predict(img, imgsz=1920, conf=0.25, iou=0.45)
+        lambda: model.predict(img, imgsz=1920, conf=0.5, iou=0.45)
     )
     inference_ms = (time.perf_counter() - t_infer_start) * 1000
 

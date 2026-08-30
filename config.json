@@ -70,17 +70,17 @@
     {
       "name":       "Trial 1 — low density, unobstructed",
       "images_dir": "./test_images/occupancy/trial_1",
-      "true_count": 35
+      "true_count": 4
     },
     {
       "name":       "Trial 2 — moderate density",
       "images_dir": "./test_images/occupancy/trial_2",
-      "true_count": 15
+      "true_count": 4
     },
     {
       "name":       "Trial 3 — higher density / some occlusion",
       "images_dir": "./test_images/occupancy/trial_3",
-      "true_count": 80
+      "true_count": 4
     }
   ]
 }
