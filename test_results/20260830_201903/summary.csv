@@ -1,0 +1,3 @@
+test,status,timestamp,notes
+B1_recognition_accuracy,pass,2026-08-30T20:24:27.510335,
+D1_occupancy_accuracy,fail,2026-08-30T20:28:51.837498,

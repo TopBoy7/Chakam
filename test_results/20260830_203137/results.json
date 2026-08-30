@@ -1,0 +1,78 @@
+{
+  "session": {
+    "label": "Attendance Mode Test \u2014 Intro to Computing, CSC 101  |  2026-08-28",
+    "started_at": "2026-08-30T20:31:37.761366",
+    "api_base": "https://chakam-api.duckdns.org",
+    "ended_at": "2026-08-30T20:34:11.059249"
+  },
+  "tests": {
+    "A1_manual_override": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:32:38.594976",
+      "session_id": "b575005b-20e3-47c9-a17c-5cafe6f8d76b",
+      "test_matric": "190407036",
+      "auto_marked": true,
+      "override_applied": true,
+      "override_held": true,
+      "final_entry": {
+        "matricNumber": "190407036",
+        "fullName": "Gideon Okolie",
+        "markedAt": "2026-08-30T19:32:11.681000",
+        "method": "manual",
+        "manuallyOverridden": true,
+        "present": false
+      }
+    },
+    "A2_erasure": {
+      "passed": false,
+      "timestamp": "2026-08-30T20:33:10.483842",
+      "matric": "250407118",
+      "recognized_before": true,
+      "erasure_ok": false,
+      "recognized_after": true
+    },
+    "A3_export": {
+      "passed": false,
+      "timestamp": "2026-08-30T20:33:10.484840",
+      "skipped": true,
+      "reason": "export is client-side only; no backend endpoint exists to test against. Verify manually via the dashboard UI."
+    },
+    "A4_session_lifecycle": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:33:36.385428",
+      "session_id": "a9de6584-595c-44a5-97fa-467479b4a084",
+      "end_ok": true,
+      "has_ended_at": true,
+      "ended_at_value": "2026-08-30T19:33:28.997000",
+      "attendance_frozen": true
+    },
+    "C1_occupancy_cap": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:33:42.054699",
+      "capacity": 50,
+      "reported_occupancy": 20
+    },
+    "C2_capacity_alert": {
+      "passed": false,
+      "timestamp": "2026-08-30T20:33:51.726300",
+      "skipped": true,
+      "reason": "alert delivery can only be confirmed by checking the ALERT_EMAIL inbox by hand"
+    },
+    "C3_ws_broadcast": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:33:58.879292",
+      "received": true,
+      "latency_ms": 5984.0,
+      "upload_occupancy": 1,
+      "event_occupancy": 1
+    },
+    "C4_image_rotation": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:34:11.059249",
+      "url_before": "https://res.cloudinary.com/dtgigdp2j/image/upload/v1788118438/smart_classrooms/uebeym2j40jkby5xu5cw.jpg",
+      "url_after_1": "https://res.cloudinary.com/dtgigdp2j/image/upload/v1788118445/smart_classrooms/tj1vesgcufo2ihocadu5.jpg",
+      "url_after_2": "https://res.cloudinary.com/dtgigdp2j/image/upload/v1788118450/smart_classrooms/qmijdi4jjxw4oo6g4qxu.jpg"
+    }
+  },
+  "metrics": {}
+}

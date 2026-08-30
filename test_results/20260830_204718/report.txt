@@ -1,0 +1,24 @@
+CHAKAM TEST REPORT — ATTENDANCE MODE + OCCUPANCY MODE
+============================================================
+Session : Attendance Mode Test — Intro to Computing, CSC 101  |  2026-08-28
+Started : 2026-08-30T20:47:18.376343
+Ended   : 2026-08-30T20:49:54.533358
+API     : https://chakam-api.duckdns.org
+
+ALL TESTS
+----------------------------------------
+  ✓ PASS  A1_manual_override
+  ✓ PASS  A2_erasure
+  SKIP  A3_export
+  ✓ PASS  A4_session_lifecycle
+  ✓ PASS  C1_occupancy_cap
+  SKIP  C2_capacity_alert
+  ✓ PASS  C3_ws_broadcast
+  ✓ PASS  C4_image_rotation
+
+QUANTITATIVE METRICS
+----------------------------------------
+
+NOTE: A3 (export) and C2 (capacity alert) always show SKIP — both
+are verified manually (browser export buttons / ALERT_EMAIL inbox),
+not scripted. See the module docstring for why.

@@ -1,0 +1,9 @@
+test,status,timestamp,notes
+A1_manual_override,pass,2026-08-30T20:32:38.594976,
+A2_erasure,fail,2026-08-30T20:33:10.483842,
+A3_export,skipped,2026-08-30T20:33:10.484840,export is client-side only; no backend endpoint exists to test against. Verify manually via the dashboard UI.
+A4_session_lifecycle,pass,2026-08-30T20:33:36.385428,
+C1_occupancy_cap,pass,2026-08-30T20:33:42.054699,
+C2_capacity_alert,skipped,2026-08-30T20:33:51.726300,alert delivery can only be confirmed by checking the ALERT_EMAIL inbox by hand
+C3_ws_broadcast,pass,2026-08-30T20:33:58.879292,
+C4_image_rotation,pass,2026-08-30T20:34:11.059249,

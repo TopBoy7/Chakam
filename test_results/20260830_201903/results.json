@@ -1,0 +1,831 @@
+{
+  "session": {
+    "label": "Attendance Mode Test \u2014 Intro to Computing, CSC 101  |  2026-08-28",
+    "started_at": "2026-08-30T20:19:03.729059",
+    "api_base": "https://chakam-api.duckdns.org",
+    "ended_at": "2026-08-30T20:28:51.837498"
+  },
+  "tests": {
+    "B1_recognition_accuracy": {
+      "passed": true,
+      "timestamp": "2026-08-30T20:24:27.510335",
+      "overall_recognition_rate_pct": 91.67,
+      "trials": [
+        {
+          "trial": "Trial 1 \u2014 bright daylight (pending_capture_2)",
+          "session_id": "511e5b00-f1a2-4506-a24b-9994dbe92a90",
+          "ground_truth_present": [
+            "250407118",
+            "190407036",
+            "252604051",
+            "250406056"
+          ],
+          "auto_marked": [
+            "250407118",
+            "190407036",
+            "252604051",
+            "250406056"
+          ],
+          "TP": 4,
+          "FP": 0,
+          "FN": 0,
+          "recognition_rate_pct": 100.0,
+          "fpr_pct": null,
+          "frame_records": [
+            {
+              "file": "bright_01_far.jpg",
+              "wall_ms": 5443.68,
+              "face_recognition_ms": 1015.14,
+              "decode_ms": 10.45,
+              "inference_ms": 586.27,
+              "cloudinary_ms": 1386.13,
+              "error": null
+            },
+            {
+              "file": "bright_02_far.jpg",
+              "wall_ms": 6715.98,
+              "face_recognition_ms": 2200.07,
+              "decode_ms": 10.71,
+              "inference_ms": 656.56,
+              "cloudinary_ms": 1182.15,
+              "error": null
+            },
+            {
+              "file": "bright_03_far.jpg",
+              "wall_ms": 6859.36,
+              "face_recognition_ms": 2119.18,
+              "decode_ms": 11.08,
+              "inference_ms": 620.68,
+              "cloudinary_ms": 1249.23,
+              "error": null
+            },
+            {
+              "file": "bright_04_mid.jpg",
+              "wall_ms": 6472.85,
+              "face_recognition_ms": 1876.12,
+              "decode_ms": 9.82,
+              "inference_ms": 658.79,
+              "cloudinary_ms": 1232.39,
+              "error": null
+            },
+            {
+              "file": "bright_05_mid.jpg",
+              "wall_ms": 6459.19,
+              "face_recognition_ms": 2256.7,
+              "decode_ms": 9.93,
+              "inference_ms": 580.41,
+              "cloudinary_ms": 1124.54,
+              "error": null
+            },
+            {
+              "file": "bright_06_mid.jpg",
+              "wall_ms": 7280.45,
+              "face_recognition_ms": 1870.49,
+              "decode_ms": 9.42,
+              "inference_ms": 643.87,
+              "cloudinary_ms": 1373.91,
+              "error": null
+            },
+            {
+              "file": "bright_07_near.jpg",
+              "wall_ms": 5048.46,
+              "face_recognition_ms": 1019.22,
+              "decode_ms": 8.06,
+              "inference_ms": 587.07,
+              "cloudinary_ms": 1082.62,
+              "error": null
+            },
+            {
+              "file": "bright_08_near.jpg",
+              "wall_ms": 6129.65,
+              "face_recognition_ms": 1607.28,
+              "decode_ms": 8.81,
+              "inference_ms": 664.03,
+              "cloudinary_ms": 1128.74,
+              "error": null
+            },
+            {
+              "file": "bright_09_near.jpg",
+              "wall_ms": 6232.93,
+              "face_recognition_ms": 1745.08,
+              "decode_ms": 8.72,
+              "inference_ms": 630.67,
+              "cloudinary_ms": 1123.44,
+              "error": null
+            },
+            {
+              "file": "bright_10_near.jpg",
+              "wall_ms": 6021.84,
+              "face_recognition_ms": 1631.46,
+              "decode_ms": 8.74,
+              "inference_ms": 630.11,
+              "cloudinary_ms": 1106.5,
+              "error": null
+            },
+            {
+              "file": "bright_11_far.jpg",
+              "wall_ms": 6503.23,
+              "face_recognition_ms": 1875.14,
+              "decode_ms": 11.7,
+              "inference_ms": 622.0,
+              "cloudinary_ms": 1276.6,
+              "error": null
+            },
+            {
+              "file": "bright_12_mid.jpg",
+              "wall_ms": 6060.93,
+              "face_recognition_ms": 1901.52,
+              "decode_ms": 9.52,
+              "inference_ms": 627.26,
+              "cloudinary_ms": 1072.74,
+              "error": null
+            },
+            {
+              "file": "bright_13_near.jpg",
+              "wall_ms": 5940.53,
+              "face_recognition_ms": 1608.62,
+              "decode_ms": 8.95,
+              "inference_ms": 640.66,
+              "cloudinary_ms": 1057.26,
+              "error": null
+            },
+            {
+              "file": "bright_14_near.jpg",
+              "wall_ms": 6263.38,
+              "face_recognition_ms": 1763.66,
+              "decode_ms": 8.9,
+              "inference_ms": 664.11,
+              "cloudinary_ms": 1116.21,
+              "error": null
+            },
+            {
+              "file": "bright_15_near.jpg",
+              "wall_ms": 6141.57,
+              "face_recognition_ms": 1779.94,
+              "decode_ms": 9.14,
+              "inference_ms": 606.56,
+              "cloudinary_ms": 1046.05,
+              "error": null
+            }
+          ]
+        },
+        {
+          "trial": "Trial 2 \u2014 fluorescent (pending_capture_3)",
+          "session_id": "b43f57d2-450e-44dd-8f16-70a523146748",
+          "ground_truth_present": [
+            "250407118",
+            "190407036",
+            "252604051",
+            "250406056"
+          ],
+          "auto_marked": [
+            "250407118",
+            "190407036",
+            "252604051",
+            "250406056"
+          ],
+          "TP": 4,
+          "FP": 0,
+          "FN": 0,
+          "recognition_rate_pct": 100.0,
+          "fpr_pct": null,
+          "frame_records": [
+            {
+              "file": "fluor_01_far.jpg",
+              "wall_ms": 7054.36,
+              "face_recognition_ms": 2702.41,
+              "decode_ms": 11.46,
+              "inference_ms": 637.89,
+              "cloudinary_ms": 1182.87,
+              "error": null
+            },
+            {
+              "file": "fluor_02_far.jpg",
+              "wall_ms": 6035.51,
+              "face_recognition_ms": 1021.45,
+              "decode_ms": 11.38,
+              "inference_ms": 568.7,
+              "cloudinary_ms": 1352.46,
+              "error": null
+            },
+            {
+              "file": "fluor_03_far.jpg",
+              "wall_ms": 5691.35,
+              "face_recognition_ms": 1021.86,
+              "decode_ms": 10.91,
+              "inference_ms": 638.31,
+              "cloudinary_ms": 1139.86,
+              "error": null
+            },
+            {
+              "file": "fluor_04_mid.jpg",
+              "wall_ms": 5212.57,
+              "face_recognition_ms": 1024.92,
+              "decode_ms": 9.09,
+              "inference_ms": 579.78,
+              "cloudinary_ms": 1097.98,
+              "error": null
+            },
+            {
+              "file": "fluor_05_mid.jpg",
+              "wall_ms": 6277.9,
+              "face_recognition_ms": 1756.76,
+              "decode_ms": 9.61,
+              "inference_ms": 706.7,
+              "cloudinary_ms": 1020.04,
+              "error": null
+            },
+            {
+              "file": "fluor_06_mid.jpg",
+              "wall_ms": 5261.76,
+              "face_recognition_ms": 1033.25,
+              "decode_ms": 9.22,
+              "inference_ms": 590.17,
+              "cloudinary_ms": 1104.27,
+              "error": null
+            },
+            {
+              "file": "fluor_07_near.jpg",
+              "wall_ms": 5455.99,
+              "face_recognition_ms": 1033.05,
+              "decode_ms": 8.91,
+              "inference_ms": 654.93,
+              "cloudinary_ms": 1244.12,
+              "error": null
+            },
+            {
+              "file": "fluor_08_near.jpg",
+              "wall_ms": 5435.73,
+              "face_recognition_ms": 1021.34,
+              "decode_ms": 8.43,
+              "inference_ms": 631.93,
+              "cloudinary_ms": 1237.42,
+              "error": null
+            },
+            {
+              "file": "fluor_09_near.jpg",
+              "wall_ms": 5550.94,
+              "face_recognition_ms": 1019.77,
+              "decode_ms": 8.73,
+              "inference_ms": 639.78,
+              "cloudinary_ms": 1178.3,
+              "error": null
+            },
+            {
+              "file": "fluor_10_near.jpg",
+              "wall_ms": 6233.74,
+              "face_recognition_ms": 1018.28,
+              "decode_ms": 8.51,
+              "inference_ms": 555.43,
+              "cloudinary_ms": 1674.54,
+              "error": null
+            },
+            {
+              "file": "fluor_11_far.jpg",
+              "wall_ms": 5746.27,
+              "face_recognition_ms": 1037.75,
+              "decode_ms": 10.92,
+              "inference_ms": 574.27,
+              "cloudinary_ms": 1341.64,
+              "error": null
+            },
+            {
+              "file": "fluor_12_far.jpg",
+              "wall_ms": 5543.7,
+              "face_recognition_ms": 1014.33,
+              "decode_ms": 11.58,
+              "inference_ms": 628.53,
+              "cloudinary_ms": 1172.28,
+              "error": null
+            },
+            {
+              "file": "fluor_13_mid.jpg",
+              "wall_ms": 6868.79,
+              "face_recognition_ms": 2113.95,
+              "decode_ms": 9.46,
+              "inference_ms": 672.19,
+              "cloudinary_ms": 1152.02,
+              "error": null
+            },
+            {
+              "file": "fluor_14_mid.jpg",
+              "wall_ms": 5116.34,
+              "face_recognition_ms": 1026.66,
+              "decode_ms": 9.8,
+              "inference_ms": 656.64,
+              "cloudinary_ms": 1099.15,
+              "error": null
+            },
+            {
+              "file": "fluor_15_near.jpg",
+              "wall_ms": 5560.93,
+              "face_recognition_ms": 1025.23,
+              "decode_ms": 8.76,
+              "inference_ms": 583.52,
+              "cloudinary_ms": 1019.76,
+              "error": null
+            },
+            {
+              "file": "fluor_16_near.jpg",
+              "wall_ms": 5425.93,
+              "face_recognition_ms": 1025.87,
+              "decode_ms": 8.82,
+              "inference_ms": 611.35,
+              "cloudinary_ms": 1060.58,
+              "error": null
+            },
+            {
+              "file": "fluor_17_near.jpg",
+              "wall_ms": 5214.84,
+              "face_recognition_ms": 1018.21,
+              "decode_ms": 8.32,
+              "inference_ms": 621.67,
+              "cloudinary_ms": 1081.55,
+              "error": null
+            },
+            {
+              "file": "fluor_18_near.jpg",
+              "wall_ms": 7193.18,
+              "face_recognition_ms": 1615.64,
+              "decode_ms": 8.44,
+              "inference_ms": 649.08,
+              "cloudinary_ms": 1363.11,
+              "error": null
+            }
+          ]
+        },
+        {
+          "trial": "Trial 3 \u2014 mixed light (shuffled bright+fluorescent)",
+          "session_id": "ddf1c13e-8b21-4e35-95e4-a8905733db0e",
+          "ground_truth_present": [
+            "250407118",
+            "190407036",
+            "252604051",
+            "250406056"
+          ],
+          "auto_marked": [
+            "250407118",
+            "190407036",
+            "250406056"
+          ],
+          "TP": 3,
+          "FP": 0,
+          "FN": 1,
+          "recognition_rate_pct": 75.0,
+          "fpr_pct": null,
+          "frame_records": [
+            {
+              "file": "mixed_01_far.jpg",
+              "wall_ms": 6686.61,
+              "face_recognition_ms": 1022.06,
+              "decode_ms": 11.05,
+              "inference_ms": 606.02,
+              "cloudinary_ms": 2148.04,
+              "error": null
+            },
+            {
+              "file": "mixed_02_far.jpg",
+              "wall_ms": 7790.59,
+              "face_recognition_ms": 2594.48,
+              "decode_ms": 11.35,
+              "inference_ms": 718.92,
+              "cloudinary_ms": 1402.1,
+              "error": null
+            },
+            {
+              "file": "mixed_03_far.jpg",
+              "wall_ms": 6765.5,
+              "face_recognition_ms": 1884.47,
+              "decode_ms": 11.55,
+              "inference_ms": 587.95,
+              "cloudinary_ms": 1271.79,
+              "error": null
+            },
+            {
+              "file": "mixed_04_mid.jpg",
+              "wall_ms": 5510.33,
+              "face_recognition_ms": 1024.5,
+              "decode_ms": 9.55,
+              "inference_ms": 641.28,
+              "cloudinary_ms": 1233.13,
+              "error": null
+            },
+            {
+              "file": "mixed_05_mid.jpg",
+              "wall_ms": 5491.33,
+              "face_recognition_ms": 1025.11,
+              "decode_ms": 9.5,
+              "inference_ms": 634.31,
+              "cloudinary_ms": 1159.43,
+              "error": null
+            },
+            {
+              "file": "mixed_06_mid.jpg",
+              "wall_ms": 6118.23,
+              "face_recognition_ms": 1599.65,
+              "decode_ms": 10.71,
+              "inference_ms": 596.11,
+              "cloudinary_ms": 1207.21,
+              "error": null
+            },
+            {
+              "file": "mixed_07_near.jpg",
+              "wall_ms": 5671.0,
+              "face_recognition_ms": 1025.13,
+              "decode_ms": 8.01,
+              "inference_ms": 628.41,
+              "cloudinary_ms": 1109.11,
+              "error": null
+            },
+            {
+              "file": "mixed_08_near.jpg",
+              "wall_ms": 5413.17,
+              "face_recognition_ms": 1023.31,
+              "decode_ms": 8.9,
+              "inference_ms": 637.52,
+              "cloudinary_ms": 1112.42,
+              "error": null
+            },
+            {
+              "file": "mixed_09_near.jpg",
+              "wall_ms": 6368.14,
+              "face_recognition_ms": 1747.76,
+              "decode_ms": 8.68,
+              "inference_ms": 593.38,
+              "cloudinary_ms": 1303.88,
+              "error": null
+            },
+            {
+              "file": "mixed_10_near.jpg",
+              "wall_ms": 6449.48,
+              "face_recognition_ms": 1617.45,
+              "decode_ms": 8.63,
+              "inference_ms": 693.59,
+              "cloudinary_ms": 1057.97,
+              "error": null
+            },
+            {
+              "file": "mixed_11_far.jpg",
+              "wall_ms": 7484.53,
+              "face_recognition_ms": 1936.81,
+              "decode_ms": 11.88,
+              "inference_ms": 724.32,
+              "cloudinary_ms": 1625.47,
+              "error": null
+            },
+            {
+              "file": "mixed_12_mid.jpg",
+              "wall_ms": 6150.61,
+              "face_recognition_ms": 1782.05,
+              "decode_ms": 9.65,
+              "inference_ms": 622.17,
+              "cloudinary_ms": 1062.13,
+              "error": null
+            },
+            {
+              "file": "mixed_13_near.jpg",
+              "wall_ms": 5438.24,
+              "face_recognition_ms": 1019.0,
+              "decode_ms": 8.39,
+              "inference_ms": 634.4,
+              "cloudinary_ms": 1224.63,
+              "error": null
+            },
+            {
+              "file": "mixed_14_near.jpg",
+              "wall_ms": 5640.43,
+              "face_recognition_ms": 1015.67,
+              "decode_ms": 8.08,
+              "inference_ms": 581.16,
+              "cloudinary_ms": 1137.97,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    "D1_occupancy_accuracy": {
+      "passed": false,
+      "timestamp": "2026-08-30T20:28:51.837498",
+      "mae": 1.34,
+      "n_frames": 47,
+      "trials": [
+        {
+          "trial": "Trial 1 \u2014 shuffled sample A (today's real frames)",
+          "mode": "per_image",
+          "trial_mae": 1.4,
+          "frames": [
+            {
+              "file": "occ_01.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_02.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_03.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_04.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_05.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_06.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_07.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_08.jpg",
+              "detected": 1,
+              "true_count": 4,
+              "error": 3
+            },
+            {
+              "file": "occ_09.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_10.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_11.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_12.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_13.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_14.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_15.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            }
+          ]
+        },
+        {
+          "trial": "Trial 2 \u2014 shuffled sample B (today's real frames)",
+          "mode": "per_image",
+          "trial_mae": 1.33,
+          "frames": [
+            {
+              "file": "occ_01.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_02.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_03.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_04.jpg",
+              "detected": 1,
+              "true_count": 4,
+              "error": 3
+            },
+            {
+              "file": "occ_05.jpg",
+              "detected": 1,
+              "true_count": 4,
+              "error": 3
+            },
+            {
+              "file": "occ_06.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_07.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_08.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_09.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_10.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_11.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_12.jpg",
+              "detected": 1,
+              "true_count": 4,
+              "error": 3
+            },
+            {
+              "file": "occ_13.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_14.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_15.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            }
+          ]
+        },
+        {
+          "trial": "Trial 3 \u2014 shuffled sample C (today's real frames)",
+          "mode": "per_image",
+          "trial_mae": 1.29,
+          "frames": [
+            {
+              "file": "occ_01.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_02.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_03.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_04.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_05.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_06.jpg",
+              "detected": 1,
+              "true_count": 4,
+              "error": 3
+            },
+            {
+              "file": "occ_07.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_08.jpg",
+              "detected": 0,
+              "true_count": 4,
+              "error": 4
+            },
+            {
+              "file": "occ_09.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_10.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_11.jpg",
+              "detected": 3,
+              "true_count": 4,
+              "error": 1
+            },
+            {
+              "file": "occ_12.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_13.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_14.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_15.jpg",
+              "detected": 4,
+              "true_count": 4,
+              "error": 0
+            },
+            {
+              "file": "occ_16.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            },
+            {
+              "file": "occ_17.jpg",
+              "detected": 2,
+              "true_count": 4,
+              "error": 2
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "B1": {
+      "overall_TP": 11,
+      "overall_FP": 0,
+      "overall_FN": 1,
+      "overall_recognition_rate_pct": 91.67
+    },
+    "D1": {
+      "mae": 1.34,
+      "n_frames": 47
+    }
+  }
+}

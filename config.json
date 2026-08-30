@@ -2,7 +2,7 @@
 
   "session_label": "Attendance Mode Test — Intro to Computing, CSC 101  |  2026-08-28",
   "api_base_url":  "https://chakam-api.duckdns.org",
-  "lecturer_email":"josephdossantos7@gmail.com",
+  "lecturer_email":"okefejoseph9@gmail.com",
   "output_dir":    "./test_results",
 
 
@@ -14,22 +14,27 @@
   "_comment3": "Test A3 (export) cannot be automated — export runs entirely client-side in the browser with no backend endpoint. It is verified manually via the dashboard UI; see the script's module docstring. This field is unused but left here in case a backend export endpoint is added later.",
   "completed_session_id": null,
 
-  "_comment4": "Local folders containing .jpg/.jpeg/.png photos of each registered student",
+  "_comment4": "Real roster from today's live CSC101 sessions (2026-08-30) — these 4 matric numbers showed Present via Camera consistently across all 3 exported attendance PDFs from today. Local enrolled/ photos are PENDING — folders created below but empty until photos are added; not required for B1 itself (B1 only needs these matric numbers to match live server-side recognition, not local photos), but needed for A1/A2/A4/B2/B3. NOTE (2026-08-30): test_students[1] is intentionally the disposable personal test account 190408010 (Joseph Okefe), NOT one of the 4 real 2026-08-30 attendance students — A2 permanently DELETEs this student's embeddings via /students/{matric}/embeddings, so a real student's live enrollment must never sit in this slot. 190408010 already has real biometrics enrolled on CSC101 and can be freely erased/re-enrolled.",
   "test_students": [
     {
+      "matric":     "190407036",
+      "name":       "Present student (today's session)",
+      "images_dir": "./test_images/enrolled/190407036"
+    },
+    {
       "matric":     "190408010",
-      "name":       "Test Student One",
+      "name":       "Disposable test account (A2 erasure target — not a real 2026-08-30 attendee)",
       "images_dir": "./test_images/enrolled/190408010"
     },
     {
-      "matric":     "190403014",
-      "name":       "Test Student Two",
-      "images_dir": "./test_images/enrolled/190403014"
+      "matric":     "252604051",
+      "name":       "Present student (today's session)",
+      "images_dir": "./test_images/enrolled/252604051"
     },
     {
-      "matric":     "190407036",
-      "name":       "Test Student Three",
-      "images_dir": "./test_images/enrolled/190407036"
+      "matric":     "250406056",
+      "name":       "Present student (today's session)",
+      "images_dir": "./test_images/enrolled/250406056"
     }
   ],
 
@@ -38,26 +43,41 @@
     "images_dir: folder of frames captured during that trial (the camera images).",
     "ground_truth_present: matric numbers of enrolled students physically present.",
     "unregistered_present: matric numbers of people in the room who are NOT enrolled.",
-    "Run at different distances and lighting conditions."
+    "Trials now use REAL phone-captured frames via camera_simulator.html + --capture,",
+    "sampled from today's pending_capture_2 (bright daylight) and pending_capture_3",
+    "(fluorescent) batches — not stock photos. trial_3 is a shuffled mix of both,",
+    "standing in for 'mixed light'. No unregistered person in this data — all 4",
+    "were present in all captures, per today's real PDF reports.",
+    "Expanded 2026-08-30 with previously-unused frames from the same two batches",
+    "(trial_1/2/3 now 15/18/14 images, up from 10/10/10) — all 4 still ground",
+    "truth-present in every added frame, no new config needed for this trial set.",
+    "Each trial's 10 images are also split into 3 SIMULATED distance buckets",
+    "(filenames tagged _far/_mid/_near): _far is untouched; _mid is a centered",
+    "75%-width crop upscaled back to full size (mimics closer/narrower framing);",
+    "_near is a tighter 55% crop, same technique. This simulates distance via",
+    "digital zoom on the SAME photos — it does not reproduce the actual optical",
+    "softness a genuinely-farther shot would have, so treat this as a framing",
+    "test (does recognition hold up as the face occupies less of the frame),",
+    "not a true optical-distance test."
   ],
   "recognition_trials": [
     {
-      "name":                 "Trial 1 — 2 m, bright daylight",
+      "name":                 "Trial 1 — bright daylight (pending_capture_2)",
       "images_dir":           "./test_images/trials/trial_1",
-      "ground_truth_present": ["190408010", "190403014"],
+      "ground_truth_present": ["190407036", "250407118", "252604051", "250406056"],
       "unregistered_present": []
     },
     {
-      "name":                 "Trial 2 — 3 m, fluorescent",
+      "name":                 "Trial 2 — fluorescent (pending_capture_3)",
       "images_dir":           "./test_images/trials/trial_2",
-      "ground_truth_present": ["190408010", "190403014"],
+      "ground_truth_present": ["190407036", "250407118", "252604051", "250406056"],
       "unregistered_present": []
     },
     {
-      "name":                 "Trial 3 — 5 m, mixed light + 1 unregistered",
+      "name":                 "Trial 3 — mixed light (shuffled bright+fluorescent)",
       "images_dir":           "./test_images/trials/trial_3",
-      "ground_truth_present": ["190408010", "190403014"],
-      "unregistered_present": ["190407036"]
+      "ground_truth_present": ["190407036", "250407118", "252604051", "250406056"],
+      "unregistered_present": []
     }
   ],
 
@@ -65,20 +85,20 @@
   "occupancy_over_capacity_dir":  "./test_images/occupancy/over_capacity",
   "occupancy_under_capacity_dir": "./test_images/occupancy/under_capacity",
 
-  "_comment7": "For D1 — true_count MUST be the actual number of people you count with your own eyes in that trial's photo(s), not a guess or copy from another trial. Update each true_count below to match the real photo you drop into that folder.",
+  "_comment7": "For D1 — ground truth lives in counts.json INSIDE each trial_N folder now (per-image, not one number here — see D1's _load_per_image_counts). Expanded 2026-08-30 with previously-unused real frames (trial_1/2/3 now 15/15/17 images, up from 10/10/10) — every newly-added filename got a fresh 'occ_NN.jpg': -1 placeholder appended to that trial's counts.json. The ORIGINAL occ_01..occ_10 entries in each are already filled in with real counts; the NEW ones (occ_11 onward) are NOT — go through each trial_N/counts.json and replace every remaining -1 with the real headcount before running D1, or those frames' errors will be nonsense by design.",
   "occupancy_trials": [
     {
-      "name":       "Trial 1 — low density, unobstructed",
+      "name":       "Trial 1 — shuffled sample A (today's real frames)",
       "images_dir": "./test_images/occupancy/trial_1",
       "true_count": 4
     },
     {
-      "name":       "Trial 2 — moderate density",
+      "name":       "Trial 2 — shuffled sample B (today's real frames)",
       "images_dir": "./test_images/occupancy/trial_2",
       "true_count": 4
     },
     {
-      "name":       "Trial 3 — higher density / some occlusion",
+      "name":       "Trial 3 — shuffled sample C (today's real frames)",
       "images_dir": "./test_images/occupancy/trial_3",
       "true_count": 4
     }

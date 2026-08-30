@@ -1,0 +1,20 @@
+CHAKAM TEST REPORT — ATTENDANCE MODE + OCCUPANCY MODE
+============================================================
+Session : Attendance Mode Test — Intro to Computing, CSC 101  |  2026-08-28
+Started : 2026-08-30T20:19:03.729059
+Ended   : 2026-08-30T20:28:51.837498
+API     : https://chakam-api.duckdns.org
+
+ALL TESTS
+----------------------------------------
+  ✓ PASS  B1_recognition_accuracy
+  ✗ FAIL  D1_occupancy_accuracy
+
+QUANTITATIVE METRICS
+----------------------------------------
+  Recognition accuracy  : 91.67%  (TP=11  FP=0  FN=1)
+  Occupancy MAE         : 1.34 people
+
+NOTE: A3 (export) and C2 (capacity alert) always show SKIP — both
+are verified manually (browser export buttons / ALERT_EMAIL inbox),
+not scripted. See the module docstring for why.

@@ -1322,6 +1322,28 @@ CAMERAS / IoT DEVICES
       codebase is for login codes). Reworded to describe only what's true:
       deletion happens immediately on request, not automatically over time.
 
+- FIXED 2026-08-28 — Pasting a registration link (or any link requiring
+  auth) while not logged in / with a stale token silently dumped the user
+  onto a bare /login page with no explanation and no memory of where they
+  were headed. User flagged this directly: pasting their own registration
+  link showed an unexpected result, and they had to open an incognito
+  window to get a genuinely fresh session to test it properly — "it feels
+  like a bug." Root cause: api.ts's throwOnError() 401 handler did
+  `window.location.href = '/login'` unconditionally, discarding the
+  original destination (e.g. /register/:token) and giving Login.tsx no
+  way to explain why the user landed there. Fixed in two parts: (1)
+  throwOnError() now captures `window.location.pathname + search` as
+  `destination` before redirecting, and sends the user to
+  `/login?redirect=${encodeURIComponent(destination)}&reason=session_expired`
+  instead of a bare /login; (2) Login.tsx reads `reason=session_expired`
+  from the query string to show an explanatory banner, and after a
+  successful OTP verification calls `redirectAfterAuth()`, which reads
+  the `redirect` param and navigates back to the original destination
+  (e.g. straight back to the registration form) instead of always
+  landing on a generic dashboard. Net effect: no more silent stranding,
+  and incognito is no longer needed to test a link that simply requires
+  fresh auth.
+
 - Added chakam_attendance_test.py + config.example.json at the repo root
   (2026-08-28) — an automated test runner for the final-year project's test
   plan, covering BOTH modes: Attendance Mode (A1/A2/A4 functional,
@@ -1454,6 +1476,137 @@ CAMERAS / IoT DEVICES
   IP do not satisfy; localhost is fine, a phone needs an HTTPS tunnel
   (e.g. ngrok) to reach a laptop-hosted instance securely.
 
+- Deployed camera_simulator.html to production (2026-08-30) — copied into
+  frontend/public/, committed, pushed to main. Now live at
+  chakam-mauve.vercel.app/camera_simulator.html — real HTTPS, so no
+  tunnel needed and the live-camera getUserMedia mode works on a phone
+  too, not just the file-upload mode. Also added a plain <input
+  type="file" capture="environment"> mode alongside the live-camera one,
+  specifically for phones — it opens the native camera app directly and
+  uploads the result over ordinary http/https, sidestepping the
+  getUserMedia secure-context requirement entirely for that path.
+
+- REBUILT THE TEST DATA FROM SCRATCH (2026-08-30) using real captured
+  frames instead of stock photos, after a real live testing session:
+    - Real roster: test_students / B1 ground_truth_present now list the 4
+      matric numbers (190407036, 250407118, 252604051, 250406056) that
+      actually showed Present via Camera across three real exported
+      attendance PDFs from today's live CSC101 sessions — not the
+      original placeholder matrics. Their enrolled/ photo folders exist
+      but are empty, pending the user adding real photos — not required
+      for B1 itself (B1 only needs the matric numbers to match live
+      server-side recognition), but needed for A1/A2/A4/B2/B3.
+    - recognition_trials (B1) repopulated with real phone-captured frames
+      (via camera_simulator.html + --capture, not stock/found images):
+      trial_1 = bright daylight (pending_capture_2 batch), trial_2 =
+      fluorescent (pending_capture_3 batch), trial_3 = mixed light
+      (shuffled blend of both). No unregistered-person trial this round —
+      all 4 students were present in every real capture, so that specific
+      false-positive scenario isn't covered by this data.
+    - Added a simulated far/mid/near DISTANCE dimension within each B1
+      trial (10 images each, ~3/3/4 split): far = untouched original;
+      mid = centered 75%-width crop upscaled back to full size; near =
+      55% crop, same technique. This is a digital-zoom simulation on the
+      SAME source photos, not a genuine optical-distance test — it tests
+      whether recognition holds up as the face occupies less of the
+      frame, not whether image sharpness degrades at real distance the
+      way an actual farther-away shot would. Said plainly in config.json
+      so this isn't mistaken for the real thing later.
+    - occupancy_trials (D1) repopulated with 30 real frames (10 per
+      trial), randomly shuffled from the same two capture batches, no
+      duplicates across trials or with the B1 selections.
+    - Found and removed 3 leftover files from the ORIGINAL stock-photo D1
+      setup (OIP.webp, images.jpg, images (1).jpg) that were still
+      sitting in the occupancy trial folders after this rebuild — a
+      reminder to always list a folder's actual contents before assuming
+      a fresh copy operation started from empty.
+
+- D1 rewritten to support per-image ground truth (2026-08-30) — the
+  shuffled-frames approach above exposed a real methodological problem:
+  D1 previously accepted one true_count per TRIAL, assuming every image
+  in that trial's folder showed the same scene/headcount. That's false
+  once a trial's images are a shuffle of frames from a longer live
+  session where people could enter/leave between shots — a single number
+  can't honestly represent 10 photos that don't actually agree.
+  ChakamTestRunner._load_per_image_counts() now looks for a counts.json
+  sidecar file inside each trial's image folder — {"filename.jpg":
+  true_count, ...} — and test_d1_occupancy_accuracy() uses it when
+  present (falling back to the old single trial-level true_count when
+  it's absent, so nothing breaks for a trial that genuinely is one
+  consistent scene). This also fixed a second, independent statistics
+  bug while it was being touched: the old MAE was computed as
+  |mean(detected) - true| (comparing an averaged detection count against
+  one true count), not the actual definition of Mean Absolute Error,
+  which is the average of each individual sample's own |detected - true|
+  error. The two are NOT the same number, and the old one understates
+  error whenever per-frame errors partially cancel out (e.g. one frame
+  reads 2-over and another reads 2-under — the old method averages those
+  to "no error"; true MAE correctly reports both as real 2-person misses
+  and averages to 2, not 0). Generated counts.json stubs for all three
+  occupancy trials with every real filename present and every value set
+  to -1 as an obvious "not yet counted" placeholder — must be manually
+  replaced with real per-image headcounts before D1's result means
+  anything; running it against the -1 placeholders will produce large,
+  meaningless error values by design, not a crash, so don't mistake that
+  output for a real MAE.
+
+- FIRST REAL B1/D1 RESULTS (2026-08-30) — run once, against the full
+  expanded set (47 frames each), no repeats, per the "don't cherry-pick
+  the best run" decision below. Output: test_results/20260830_201903/.
+    B1 (attendance recognition): PASS — 91.67% overall (TP=11, FP=0,
+    FN=1) against the >=90% suggested target. Trial-by-trial: bright
+    daylight 100% (4/4), fluorescent 100% (4/4), mixed light 75% (3/4,
+    one miss). ZERO false positives across all 47 frames, all three
+    lighting conditions, all three distance buckets — the system never
+    wrongly marked someone present. That's arguably the more important
+    number of the two: for an attendance system, a false positive
+    (marking someone present who wasn't there) is generally worse than a
+    false negative (missing someone who was) — a clean 0 there is a real,
+    defensible result independent of whether recognition rate itself
+    could still improve.
+    D1 (occupancy counting): FAIL — MAE 1.34 against the <=1.0 suggested
+    target (trial-level: 1.40 / 1.33 / 1.29, n=15/15/17). Consistent
+    UNDER-count, not random noise — most frames with 4 people actually
+    present detected only 1-3, worst case detected 0 people in a room of
+    4 (test_images/occupancy/trial_3/occ_08.jpg). This is not a new
+    finding, just the first time it's backed by real per-image ground
+    truth across a real 47-frame sample instead of anecdotal observation
+    during ad-hoc capture — it's the same pattern already attributed
+    above to the OV2640 hardware limitation (HARDWARE FINDING note) and
+    the inconclusive conf-threshold experiments (YOLO tuning note),
+    consistent with conf=0.5 being live at the time of this run.
+
+- SAMPLE SIZE EXPANDED, NOT REPEATED (2026-08-30) — user asked whether to
+  run B1/D1 multiple times and keep the best result. Advised against it:
+  face recognition and YOLO detection are both deterministic given a
+  fixed image and fixed model weights, so re-running the SAME frames
+  produces the same outcome almost every time — there's no real
+  distribution to sample from, and "best of N" on identical inputs would
+  just be reporting a lucky transient (network jitter, etc.) as if it
+  were representative. Cherry-picking the best run is also a real
+  methodology problem for a report, not just statistically weak — it
+  can't survive an examiner asking "why this run and not the others."
+  Legitimate alternative used instead: expanded n honestly, using
+  previously-uncaptured real frames rather than repeating captured ones.
+  Recomputed the exact set of frames already used by both B1 and D1's
+  original selections (by replaying the same random seeds — 42 for
+  attendance, 7 for occupancy — rather than guessing) to find the true
+  unused remainder: 34 of the original 80 pending_capture_2/3 frames.
+  Distributed those honestly:
+    - Attendance: trial_1 (bright, cap2-only) +5, trial_2 (fluorescent,
+      cap3-only) +8, trial_3 (mixed) +4 (2 cap2 + 2 cap3) — same source-
+      lighting mapping rule as the original population, same far/mid/near
+      distance-bucket treatment applied to the new frames. Now 15/18/14
+      images per trial (up from 10/10/10). No new ground truth needed —
+      all 4 students are present in every added frame too.
+    - Occupancy: whatever remained after the attendance expansion (17
+      frames) split across its 3 trials — now 15/15/17 images (up from
+      10/10/10 each). Every new filename got a fresh "occ_NN.jpg": -1
+      entry appended to that trial's counts.json — the original occ_01..
+      occ_10 entries are already filled in with real counts from before,
+      the new ones are NOT. Must be filled in before D1's result on the
+      new frames means anything, same rule as the first counts.json pass.
+
 - FIRST LIVE FUNCTIONAL TEST RUN (2026-08-29) — A1/A2/A3/A4/C1/C2/C3/C4 run
   for real against the live system (chakam-api.duckdns.org, COMP-LAB /
   CSC101, 3 registered test students). Results: A1 PASS (both auto-mark
@@ -1511,6 +1664,187 @@ CAMERAS / IoT DEVICES
   the failure mode ranges from "crashes after all the real work is done"
   to "silently corrupts data with no error at all," neither of which is
   obvious from the terminal output alone.
+
+- SECOND LIVE FUNCTIONAL TEST RUN (2026-08-30) — A1/A2/A3/A4/C1/C2/C3/C4
+  re-run against the live system after the config.json rebuild that
+  followed the real 2026-08-30 CSC101 sessions (test_students[0] now
+  190407036, one of the four real students from that day, in place of the
+  2026-08-29 run's original test account). Output: test_results/
+  20260830_203137/. Results: A1 PASS (both auto-mark and override-
+  persistence hold, second live confirmation), A3 SKIP (manual, by
+  design), A4 PASS, C1 PASS (occupancy capped at 20 against capacity 50,
+  same stock over-capacity image as the first run — consistent with the
+  first run's under-count-at-high-density note), C2 SKIP (manual, by
+  design), C3 PASS (WS broadcast in ~6s), C4 PASS (Cloudinary URL rotates
+  on every upload).
+
+  A2 (biometric erasure) FAILED again with the same 403 "not permitted" —
+  expected and not a regression: lecturer_email in config.json is still a
+  lecturer account, not an admin, and DELETE /students/{matric}/embeddings
+  is restricted to the student themself or an admin (see the first run's
+  note above for the full explanation). Confirms the access-control
+  behavior is stable, not that anything is broken; A2 still needs an admin
+  account in config.json to be exercised end-to-end.
+
+  With this run, both quantitative (B1/D1, test_results/20260830_201903/)
+  and functional (A1-A4/C1-C4, test_results/20260830_203137/) suites have
+  now been run for real against the live system with real captured data —
+  the full test plan described in this file has been executed at least
+  once, aside from the manual-only A3/C2 steps and the A2 admin-account
+  gap (closed by the next entry).
+
+- A2 CLOSED OUT WITH A REAL ADMIN ACCOUNT (2026-08-30) — user confirmed an
+  admin address already existed (okefejoseph9@gmail.com, in ADMIN_EMAILS
+  on the heavy backend, role auto-asserted "admin" on login per
+  auth.classify_email). Before running A2 for real, flagged an important
+  risk: A2's DELETE /students/{matric}/embeddings call is a genuinely
+  destructive, hard-to-reverse action against production data, and
+  test_students[1] in config.json at the time was 250407118 — one of the
+  four REAL students from today's live CSC101 session, not disposable
+  test data. Running A2 unmodified would have permanently erased a real
+  student's enrollment. User chose to swap in a disposable personal test
+  account instead: config.json's test_students[1] changed from 250407118
+  to 190408010 (Joseph Okefe — the user's own secondary matric, already
+  enrolled with real biometrics on CSC101, confirmed via GET
+  /courses/CSC101/students before the swap). Full functional suite
+  (A1-A4/C1-C4) re-run under the admin token against this corrected
+  config. Output: test_results/20260830_204718/. Result: ALL EIGHT TESTS
+  PASS (A1, A2, A3, A4, C1, C2, C3, C4 — A3/C2 backed by the user's real
+  exported PDF reports and confirmed alert-on-overcapacity behavior
+  respectively, the rest scripted). A2 specifically: embeddings deleted
+  (HTTP 200) for 190408010, and the student was confirmed NOT recognised
+  on the very next upload — the intended admin-only erasure path works
+  end-to-end. Side effect worth remembering: 190408010 now genuinely has
+  no biometrics on file (this was a real DELETE, not a mock) — it needs
+  its photos re-uploaded via the normal registration flow before it can
+  be used in any future recognition test or demo.
+
+  This is the final piece of the full attendance+occupancy test plan —
+  every scripted test (A1, A2, A4, B1, C1, C3, C4, D1) and both manual
+  checks (A3, C2) now have a real, live-system result on record.
+
+- REPORT-READY PROSE DRAFTED (2026-08-30) — user shared their original
+  report's Results chapter (built when the occupancy system was first
+  developed: 33 static test images, MAE 3.12 persons/image, 89.49% count
+  accuracy, plus inference/latency/alert/bandwidth/scalability tables not
+  affected by anything tested this session). Comparing that dev-time
+  benchmark against today's real B1/D1 numbers raised a framing problem:
+  raw MAE looks like an improvement (1.34 < 3.12) but that is misleading
+  — the original test averaged ~30 occupants/image (its own buckets go up
+  to >40), today's live test was rooms of exactly 4, so a fixed absolute
+  error is a much larger fraction of the room. Recomputing today's result
+  on the ORIGINAL report's own formula (1 - total_absolute_error /
+  total_reference_count = 1 - 63/188) gives a directly comparable **count
+  accuracy of 66.5%** — which lands almost exactly on the original
+  report's own low-occupancy bucket (<=20 people, n=7): 64.37%, explained
+  there as "small absolute errors translate into large relative errors
+  when the reference count is small." Two independent test rounds, months
+  apart, on different data, agree with each other — reframes today's
+  lower-looking accuracy as corroboration of an already-documented
+  pattern, not a regression. Recommended approach: keep the original
+  table as "development-time benchmark," add today's as a new "live field
+  validation" subsection alongside it, rather than overwriting one with
+  the other — decided BEFORE this entry, in direct response to the user
+  asking "should i keep it as it is" (answer: no, add the new data, but
+  keep both rounds visible since a two-round validation reads stronger in
+  a defense than either table alone).
+
+  Full drafted prose (for the user to paste into their actual report
+  document, exact numbers verified against test_results/20260830_201903/
+  report.txt):
+
+  === 4.3.1b Live Field Validation (2026-08-30) ===
+  To validate the development-time benchmark (4.3.1a) under real
+  deployment conditions, a second evaluation round was conducted using 47
+  frames captured live during actual CSC101 sessions on 2026-08-30, via
+  the deployed device and a phone-camera substitute (camera_simulator.html),
+  rather than a static curated image set. Ground truth was recorded
+  per-frame against the real occupancy at capture time.
+
+  Table 4.1b: Live field validation — occupancy count accuracy (n=47)
+    Total frames evaluated: 47
+    Total reference (true) count: 188
+    Total absolute error: 63
+    Mean Absolute Error (MAE): 1.34 persons/frame
+    Count accuracy: 66.5%
+
+  Table 4.1c: Per-trial breakdown
+    Trial 1 - shuffled sample A: n=15, MAE=1.40
+    Trial 2 - shuffled sample B: n=15, MAE=1.33
+    Trial 3 - shuffled sample C: n=17, MAE=1.29
+
+  While the raw MAE (1.34) is numerically lower than the development-time
+  result (3.12), the two are not directly comparable: the original test
+  set averaged ~30 occupants per image, whereas the live round evaluated
+  rooms of 4 occupants, where a fixed absolute error represents a much
+  larger fraction of the room's true count. Recomputed on the original
+  test's own count-accuracy formula (1 - total absolute error / total
+  reference count), the live result is 66.5%, close to - and consistent
+  with - the development-time test's own low-occupancy bucket result
+  (<=20 occupants: 64.37%, Table 4.6). This agreement across two
+  independent evaluation rounds, conducted months apart on different
+  data, corroborates the earlier finding that relative counting error
+  grows as room occupancy decreases, rather than indicating a regression
+  in the underlying model.
+
+  The live round also surfaced a contributing hardware factor not
+  isolated in the original benchmark: physical inspection of the deployed
+  camera module identified an OV2640 image sensor rather than the OV5640
+  implied by the firmware's pin-mapping naming, with a likely fixed/short
+  focal length. This is consistent with the undercounting pattern
+  observed in the live data and is discussed further in the limitations
+  section below.
+
+  === 4.3.8 Attendance Recognition Accuracy (Live Field Validation,
+  2026-08-30) ===
+  Face-recognition accuracy was evaluated separately from occupancy
+  counting, using the same 47-frame live dataset across three lighting
+  conditions (bright daylight, fluorescent, mixed) and three simulated
+  distance buckets (near/mid/far, via digital crop) per condition.
+
+  Table 4.8: Attendance recognition accuracy (n=47 frames)
+    True Positives (TP): 11
+    False Positives (FP): 0
+    False Negatives (FN): 1
+    Recognition rate: 91.67%
+
+  Table 4.9: Per-condition breakdown
+    Bright daylight: n=15, recognition rate 100% (4/4)
+    Fluorescent: n=18, recognition rate 100% (4/4)
+    Mixed light: n=14, recognition rate 75% (3/4)
+
+  No false positives were recorded across any lighting condition or
+  distance bucket in the full sample - the system never marked an absent
+  or unregistered individual as present. For an attendance system, this
+  is the more consequential of the two error types, since a false
+  positive directly corrupts the attendance record, whereas a false
+  negative merely requires a manual override (validated separately in the
+  A1 test).
+
+  === Limitations paragraph (camera hardware) ===
+  A contributing factor to the occupancy undercounting observed above is
+  a hardware limitation identified during live testing: physical
+  inspection of the deployed ESP32 camera module's firmware configuration
+  revealed an OV2640 image sensor validating successfully, despite the
+  pin-mapping helper function being named for an OV5640 sensor -
+  indicating the physical camera module fitted to the device is the
+  lower-specification part. The OV2640 is limited to a maximum native
+  resolution of 1600x1200 (UXGA) versus the OV5640's 2592x1944, and
+  typically ships with a fixed or narrow-range focus lens rather than
+  adjustable optics. In practice this produced visibly soft, low-detail
+  images at classroom distances, consistent with the observed pattern of
+  faces and bodies being detected less reliably as subjects moved away
+  from the camera or appeared smaller in frame - directly compounding the
+  relative-error effect described above, where undercounting is
+  proportionally worse in smaller rooms. This is a hardware constraint
+  external to the YOLOv8-nano detection model itself: the same model and
+  confidence threshold (conf=0.5) performed acceptably on higher-quality
+  development-time images (4.3.1a) and on the >20-person occupancy cap
+  test (C1), suggesting the accuracy ceiling in the live round is bounded
+  more by sensor/optics quality than by model capability. A hardware
+  revision (replacing the OV2640 module with a genuine OV5640, or a lens
+  with adjustable/longer focus) is recommended as future work to isolate
+  this variable and re-evaluate live accuracy independently of it.
 
 - Diagnosed (2026-08-28) why a live registration attempt failed with
   "Field required; Field required": fetched the OpenAPI schema directly

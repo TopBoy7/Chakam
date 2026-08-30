@@ -978,6 +978,23 @@ class ChakamTestRunner:
     # ═══════════════════════════════════════════════════════════════════════
     # TEST D1 — Occupancy Counting Accuracy Across Conditions
     # ═══════════════════════════════════════════════════════════════════════
+    def _load_per_image_counts(self, images_dir: str) -> Optional[dict]:
+        """Look for a counts.json sidecar file in the trial's image folder —
+        {"filename.jpg": true_count, ...}. Returns None if absent, so callers
+        can fall back to a single trial-level true_count. Per-image ground
+        truth matters whenever a trial's images don't all show the same
+        scene/headcount (e.g. frames sampled from a longer live session where
+        people moved in/out) — a single number can't honestly represent all
+        of them if they disagree."""
+        path = Path(images_dir) / 'counts.json'
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except (json.JSONDecodeError, OSError) as e:
+            warn(f'  Could not read {path}: {e} — falling back to trial-level true_count')
+            return None
+
     def test_d1_occupancy_accuracy(self):
         head('TEST D1 — Occupancy Counting Accuracy Across Conditions')
         cfg    = self.cfg
@@ -988,62 +1005,81 @@ class ChakamTestRunner:
             self._log('D1_occupancy_accuracy', False, {'skipped': True}); return
 
         class_id = cfg['class_id']
-        errors   = []
+        per_image_errors = []   # every |detected - true| across ALL trials/images
         trial_results = []
 
         for trial in trials:
-            name       = trial['name']
-            images     = self._images_from_dir(trial['images_dir'])
-            true_count = trial['true_count']
+            name              = trial['name']
+            images            = self._images_from_dir(trial['images_dir'])
+            trial_true_count  = trial.get('true_count')
+            per_image_counts  = self._load_per_image_counts(trial['images_dir'])
 
-            info(f'\nTrial: {name}  (true count: {true_count})')
+            mode = 'per-image counts.json' if per_image_counts else f'single true_count={trial_true_count}'
+            info(f'\nTrial: {name}  ({mode})')
             if not images:
                 warn(f'  No images in {trial["images_dir"]} — skipping trial'); continue
 
-            detected_counts = []
+            frame_results = []
             for img in images:
+                if per_image_counts is not None:
+                    if img.name not in per_image_counts:
+                        warn(f'  {img.name}: not listed in counts.json — skipping this frame'); continue
+                    true_for_frame = per_image_counts[img.name]
+                elif trial_true_count is not None:
+                    true_for_frame = trial_true_count
+                else:
+                    warn(f'  {img.name}: no counts.json and no trial-level true_count — skipping'); continue
+
                 resp = self._upload_image(class_id, str(img))
                 occ  = (resp.get('_classroom') or {}).get('occupancy')
-                if occ is not None:
-                    detected_counts.append(occ)
-                    info(f'  {img.name}: detected={occ}')
+                if occ is None:
+                    warn(f'  {img.name}: no occupancy in response — skipping'); continue
+
+                frame_error = abs(occ - true_for_frame)
+                per_image_errors.append(frame_error)
+                frame_results.append({
+                    'file': img.name, 'detected': occ,
+                    'true_count': true_for_frame, 'error': frame_error,
+                })
+                info(f'  {img.name}: detected={occ}  true={true_for_frame}  error={frame_error}')
                 time.sleep(0.5)
 
-            if not detected_counts:
+            if not frame_results:
                 warn(f'  No valid detections for trial "{name}"'); continue
 
-            avg_detected = statistics.mean(detected_counts)
-            error = avg_detected - true_count
-            errors.append(abs(error))
-
-            info(f'  Avg detected={avg_detected:.2f}  true={true_count}  error={error:+.2f}')
+            trial_mae = statistics.mean(f['error'] for f in frame_results)
+            info(f'  Trial MAE: {trial_mae:.2f}  (n={len(frame_results)})')
             trial_results.append({
-                'trial':            name,
-                'true_count':       true_count,
-                'detected_counts':  detected_counts,
-                'avg_detected':     round(avg_detected, 2),
-                'error':            round(error, 2),
+                'trial':    name,
+                'mode':     'per_image' if per_image_counts else 'single_true_count',
+                'trial_mae': round(trial_mae, 2),
+                'frames':   frame_results,
             })
 
-        if not errors:
+        if not per_image_errors:
             fail('No trials produced results')
             self._log('D1_occupancy_accuracy', False, {'no_results': True}); return
 
-        mae = statistics.mean(errors)
+        # True Mean Absolute Error: the average of each individual frame's
+        # |detected - true| — NOT |mean(detected) - true|, which is a
+        # different, less rigorous statistic that the previous version of
+        # this test used.
+        mae = statistics.mean(per_image_errors)
         print(f'\n  ── OVERALL ─────────────────────────────')
-        print(f'  Mean Absolute Error: {mae:.2f} people')
+        print(f'  Mean Absolute Error: {mae:.2f} people  (n={len(per_image_errors)} frames)')
 
         # No official target exists for this in the project docs (unlike B1's
         # 90%/5% from the original attendance test plan) — 1.0 is a reasonable
-        # starting bar for a single-camera nano-YOLO setup at conf=0.5; adjust
-        # to whatever your report actually commits to.
+        # starting bar for a single-camera nano-YOLO setup; adjust to whatever
+        # your report actually commits to.
         passed = mae <= 1.0
         if passed: ok(f'D1 within suggested target: MAE={mae:.2f} <= 1.0')
         else:      warn(f'D1 above suggested target: MAE={mae:.2f} > 1.0')
 
-        self.results['metrics']['D1'] = {'mae': round(mae, 2)}
+        self.results['metrics']['D1'] = {'mae': round(mae, 2), 'n_frames': len(per_image_errors)}
         self._log('D1_occupancy_accuracy', passed, {
             'mae': round(mae, 2),
+            'n_frames': len(per_image_errors),
             'trials': trial_results,
         })
 
