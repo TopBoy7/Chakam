@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chakam Camera Simulator</title>
+<style>
+  :root {
+    --bg: #101815;
+    --surface: #17211d;
+    --surface-2: #1f2b25;
+    --border: #2b3a33;
+    --ink: #e9f1ec;
+    --ink-muted: #9db3a8;
+    --accent: #3fc3b6;
+    --accent-ink: #08221f;
+    --ok: #4fd17a;
+    --warn: #e0b93f;
+    --err: #e2735a;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 80px; }
+  header { padding: 8px 0 20px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; font-weight: 700; }
+  .sub { color: var(--ink-muted); font-size: 0.85rem; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-muted);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .field label { font-size: 0.72rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  input[type=text], input[type=number], select {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  video { width: 100%; border-radius: 10px; background: #000; display: block; }
+  .video-wrap { position: relative; }
+  .video-badge {
+    position: absolute; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.6); color: var(--ink);
+    font-family: var(--mono); font-size: 0.7rem;
+    padding: 3px 8px; border-radius: 100px;
+  }
+
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 18px;
+    cursor: pointer;
+    transition: opacity 120ms ease, transform 80ms ease;
+  }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-secondary { background: var(--surface-2); color: var(--ink); border: 1px solid var(--border); }
+  .btn-danger { background: #3a1c17; color: var(--err); border: 1px solid #5a2c22; }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 0.85rem; }
+  .toggle-row input[type=number] { width: 80px; }
+
+  .status-line {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    margin-top: 10px;
+    min-height: 1.2em;
+  }
+  .status-line.ok { color: var(--ok); }
+  .status-line.err { color: var(--err); }
+
+  .log {
+    max-height: 320px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+  .log-entry {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .log-entry .t { color: var(--ink-muted); flex-shrink: 0; }
+  .log-entry .msg { flex: 1; }
+  .log-entry.ok .msg { color: var(--ok); }
+  .log-entry.err .msg { color: var(--err); }
+  .log-empty { color: var(--ink-muted); font-size: 0.8rem; text-align: center; padding: 12px 0; }
+
+  .hint { font-size: 0.76rem; color: var(--ink-muted); margin-top: 8px; }
+  .hint code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📷 Chakam Camera Simulator</h1>
+    <div class="sub">Uses this browser's camera instead of the ESP32 device — sends frames to the exact same <code>POST /classrooms/{classId}/image</code> endpoint the real hardware uses. No login needed; this endpoint isn't auth-gated.</div>
+  </header>
+
+  <div class="card">
+    <h2>Target</h2>
+    <div class="row">
+      <div class="field">
+        <label for="apiBase">API Base URL</label>
+        <input type="text" id="apiBase" value="https://chakam-api.duckdns.org">
+      </div>
+      <div class="field">
+        <label for="classId">Class ID</label>
+        <input type="text" id="classId" value="COMP-LAB">
+      </div>
+      <div class="field">
+        <label for="deviceId">Device ID</label>
+        <input type="text" id="deviceId" value="dev-00134">
+      </div>
+    </div>
+    <div class="hint">Must match the classroom's registered <code>deviceId</code> exactly, or every upload gets rejected with a 400.</div>
+  </div>
+
+  <div class="card">
+    <h2>Take or Upload a Photo <span style="opacity:.6; text-transform:none; letter-spacing:0;">— easiest on a phone</span></h2>
+    <div class="hint" style="margin-top:-4px; margin-bottom:10px;">Tap below to open your camera app (or pick an existing photo), confirm it, then send. Works over a plain <code>http://</code> link — no HTTPS tunnel needed for this mode.</div>
+    <label for="fileInput" style="font-size:0.72rem; color:var(--ink-muted); text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:4px;">Photo</label>
+    <input type="file" id="fileInput" accept="image/*" capture="environment">
+    <div id="filePreviewWrap" style="display:none; margin-top:10px;">
+      <img id="filePreview" alt="Selected photo preview" style="width:100%; border-radius:10px; display:block;">
+    </div>
+    <div class="btns">
+      <button class="btn-primary" id="btnSendFile" disabled>Send This Photo</button>
+    </div>
+    <div class="status-line" id="fileStatusLine"></div>
+  </div>
+
+  <div class="card">
+    <h2>Or: Live Camera in This Browser <span style="opacity:.6; text-transform:none; letter-spacing:0;">— needs HTTPS/localhost</span></h2>
+    <div class="row">
+      <div class="field" style="flex: 2;">
+        <label for="camSelect">Camera</label>
+        <select id="camSelect"><option>Requesting permission…</option></select>
+      </div>
+    </div>
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <span class="video-badge" id="resBadge">–</span>
+    </div>
+    <div class="btns">
+      <button class="btn-primary" id="btnCapture" disabled>Capture &amp; Send</button>
+      <button class="btn-secondary" id="btnRestart">Restart Camera</button>
+    </div>
+    <div class="toggle-row">
+      <label><input type="checkbox" id="autoToggle"> Auto-capture every</label>
+      <input type="number" id="autoInterval" value="3" min="1" step="0.5">
+      <span>seconds (mimics the real device's upload cadence)</span>
+    </div>
+    <div class="status-line" id="statusLine"></div>
+  </div>
+
+  <div class="card">
+    <h2>Capture Log</h2>
+    <div class="log" id="log"><div class="log-empty">No captures yet.</div></div>
+  </div>
+</div>
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const video = $('video'), canvas = $('canvas'), resBadge = $('resBadge');
+const camSelect = $('camSelect'), btnCapture = $('btnCapture'), btnRestart = $('btnRestart');
+const autoToggle = $('autoToggle'), autoInterval = $('autoInterval');
+const statusLine = $('statusLine'), logEl = $('log');
+const apiBaseEl = $('apiBase'), classIdEl = $('classId'), deviceIdEl = $('deviceId');
+
+let currentStream = null;
+let autoTimer = null;
+
+// ── Persist config in localStorage ──────────────────────────────────────
+['apiBase', 'classId', 'deviceId'].forEach((key) => {
+  const el = $(key);
+  const saved = localStorage.getItem('chakam_sim_' + key);
+  if (saved) el.value = saved;
+  el.addEventListener('input', () => localStorage.setItem('chakam_sim_' + key, el.value));
+});
+
+function setStatus(msg, kind) {
+  statusLine.textContent = msg;
+  statusLine.className = 'status-line' + (kind ? ' ' + kind : '');
+}
+
+function logEntry(msg, kind) {
+  const empty = logEl.querySelector('.log-empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'log-entry' + (kind ? ' ' + kind : '');
+  const t = new Date().toLocaleTimeString();
+  div.innerHTML = `<span class="t">${t}</span><span class="msg"></span>`;
+  div.querySelector('.msg').textContent = msg;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ── Camera setup ─────────────────────────────────────────────────────────
+async function listCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cams = devices.filter((d) => d.kind === 'videoinput');
+  camSelect.innerHTML = '';
+  cams.forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = c.deviceId;
+    opt.textContent = c.label || `Camera ${i + 1}`;
+    camSelect.appendChild(opt);
+  });
+  return cams;
+}
+
+async function startCamera(deviceId) {
+  if (currentStream) {
+    currentStream.getTracks().forEach((t) => t.stop());
+  }
+  const constraints = {
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      : { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false,
+  };
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    currentStream = stream;
+    video.srcObject = stream;
+    await video.play();
+    resBadge.textContent = `${video.videoWidth}×${video.videoHeight}`;
+    btnCapture.disabled = false;
+    setStatus('Camera ready.', 'ok');
+  } catch (err) {
+    setStatus('Camera error: ' + err.message, 'err');
+    logEntry('Camera error: ' + err.message, 'err');
+  }
+}
+
+async function initCameras() {
+  try {
+    // Need a permission grant before labels are populated — request once generically.
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    tmp.getTracks().forEach((t) => t.stop());
+    const cams = await listCameras();
+    if (cams.length) {
+      // Prefer a rear/back camera by label if one exists (better optics on phones).
+      const back = cams.find((c) => /back|rear|environment/i.test(c.label));
+      camSelect.value = (back || cams[0]).deviceId;
+      await startCamera(camSelect.value);
+    } else {
+      setStatus('No cameras found.', 'err');
+    }
+  } catch (err) {
+    setStatus('Camera permission denied or unavailable: ' + err.message, 'err');
+    logEntry('Init error: ' + err.message, 'err');
+  }
+}
+
+camSelect.addEventListener('change', () => startCamera(camSelect.value));
+btnRestart.addEventListener('click', () => startCamera(camSelect.value));
+
+// ── Shared: send any image blob/file to the backend ─────────────────────
+async function sendImageBlob(blob, { setStatusFn, disableEl } = {}) {
+  const apiBase = apiBaseEl.value.replace(/\/$/, '');
+  const classId = classIdEl.value.trim();
+  const deviceId = deviceIdEl.value.trim();
+  const status = setStatusFn || setStatus;
+
+  if (!apiBase || !classId || !deviceId) {
+    status('Fill in API base URL, class ID, and device ID first.', 'err');
+    return;
+  }
+  if (disableEl) disableEl.disabled = true;
+  status('Uploading…');
+  try {
+    const formData = new FormData();
+    formData.append('deviceId', deviceId);
+    formData.append('file', blob, 'capture.jpg');
+
+    const t0 = performance.now();
+    const res = await fetch(`${apiBase}/classrooms/${encodeURIComponent(classId)}/image`, {
+      method: 'POST',
+      body: formData,
+    });
+    const wallMs = Math.round(performance.now() - t0);
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      const detail = json?.detail || json?.message || `HTTP ${res.status}`;
+      status(`Failed: ${detail}`, 'err');
+      logEntry(`FAIL (${wallMs}ms) — ${detail}`, 'err');
+      return;
+    }
+
+    const data = json?.data || {};
+    const occ = data.classroom?.occupancy;
+    const cap = data.classroom?.capacity;
+    const metrics = data.metrics || {};
+    const attendance = data.attendance;
+
+    let summary = `occupancy ${occ}/${cap}  ·  wall ${wallMs}ms  ·  infer ${metrics.inference_ms ?? '–'}ms`;
+    if (attendance) {
+      const newly = attendance.newlyMarked || [];
+      summary += `  ·  session ${attendance.courseCode || ''} +${newly.length} marked`;
+    }
+    status('Sent OK — ' + summary, 'ok');
+    logEntry(summary, 'ok');
+  } catch (err) {
+    status('Error: ' + err.message, 'err');
+    logEntry('Error: ' + err.message, 'err');
+  } finally {
+    if (disableEl) disableEl.disabled = false;
+  }
+}
+
+// ── Mode 1: take/upload a photo via file input ───────────────────────────
+const fileInput = $('fileInput'), btnSendFile = $('btnSendFile');
+const filePreview = $('filePreview'), filePreviewWrap = $('filePreviewWrap');
+const fileStatusLine = $('fileStatusLine');
+let selectedFile = null;
+
+function setFileStatus(msg, kind) {
+  fileStatusLine.textContent = msg;
+  fileStatusLine.className = 'status-line' + (kind ? ' ' + kind : '');
+}
+
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+  selectedFile = f;
+  filePreview.src = URL.createObjectURL(f);
+  filePreviewWrap.style.display = 'block';
+  btnSendFile.disabled = false;
+  setFileStatus(`Ready to send (${(f.size / 1024).toFixed(0)} KB).`);
+});
+
+btnSendFile.addEventListener('click', () => {
+  if (!selectedFile) return;
+  sendImageBlob(selectedFile, { setStatusFn: setFileStatus, disableEl: btnSendFile });
+});
+
+// ── Mode 2: live camera in this browser ──────────────────────────────────
+function grabBlob() {
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+}
+
+async function captureAndSend() {
+  btnCapture.disabled = true;
+  setStatus('Capturing…');
+  try {
+    const blob = await grabBlob();
+    if (!blob) throw new Error('Failed to capture frame from video');
+    await sendImageBlob(blob, { setStatusFn: setStatus, disableEl: null });
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'err');
+    logEntry('Error: ' + err.message, 'err');
+  } finally {
+    btnCapture.disabled = false;
+  }
+}
+
+btnCapture.addEventListener('click', captureAndSend);
+
+// ── Auto-capture loop (live camera mode only) ────────────────────────────
+autoToggle.addEventListener('change', () => {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  if (autoToggle.checked) {
+    const seconds = Math.max(1, parseFloat(autoInterval.value) || 3);
+    autoTimer = setInterval(captureAndSend, seconds * 1000);
+    logEntry(`Auto-capture started (every ${seconds}s)`, 'ok');
+  } else {
+    logEntry('Auto-capture stopped', '');
+  }
+});
+
+initCameras();
+</script>
+</body>
+</html>
